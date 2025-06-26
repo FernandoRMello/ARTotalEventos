@@ -29,7 +29,6 @@ export default function Cadastro() {
   const [capturedImage, setCapturedImage] = useState(null);
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
 
   useEffect(() => {
     carregarEmpresas();
@@ -137,10 +136,35 @@ export default function Cadastro() {
     }
   };
 
+  // Função para validar e formatar CPF
+  const validarCPF = (cpf) => {
+    // Remove caracteres não numéricos
+    cpf = cpf.replace(/\D/g, '');
+    
+    // Verifica se tem 11 dígitos
+    if (cpf.length !== 11) return null;
+    
+    // Formata CPF (XXX.XXX.XXX-XX)
+    return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  };
+
+  // Função para validar e formatar RG
+  const validarRG = (rg) => {
+    // Remove caracteres não numéricos
+    rg = rg.replace(/\D/g, '');
+    
+    // Verifica se tem entre 8 e 10 dígitos
+    if (rg.length < 8 || rg.length > 10) return null;
+    
+    // Formata RG (XX.XXX.XXX-X)
+    return rg.replace(/(\d{2})(\d{3})(\d{3})(\d{1})/, '$1.$2.$3-$4');
+  };
+
   const processarOCR = async (file) => {
     setOcrLoading(true);
     setError('');
     setOcrError('');
+    setSuccess('');
 
     const formDataOCR = new FormData();
     formDataOCR.append('documento', file);
@@ -152,31 +176,59 @@ export default function Cadastro() {
         },
       });
 
+      console.log('Resposta do OCR:', response.data);
+
       const { nome, cpf, rg } = response.data;
       
-      if (nome) {
-        setFormData(prev => ({ ...prev, nome }));
-      }
-      if (cpf) {
-        setFormData(prev => ({ ...prev, documento: cpf }));
-      } else if (rg) {
-        setFormData(prev => ({ ...prev, documento: rg }));
+      // Validação dos dados extraídos
+      let dadosValidos = false;
+      const novosDados = {};
+
+      if (nome && typeof nome === 'string' && nome.trim().length >= 3) {
+        novosDados.nome = nome.trim();
+        dadosValidos = true;
       }
 
-      if (nome || cpf || rg) {
+      if (cpf) {
+        const cpfFormatado = validarCPF(cpf);
+        if (cpfFormatado) {
+          novosDados.documento = cpfFormatado;
+          dadosValidos = true;
+        }
+      } else if (rg) {
+        const rgFormatado = validarRG(rg);
+        if (rgFormatado) {
+          novosDados.documento = rgFormatado;
+          dadosValidos = true;
+        }
+      }
+
+      if (dadosValidos) {
+        setFormData(prev => ({ ...prev, ...novosDados }));
         setSuccess('Dados extraídos do documento com sucesso! Verifique e complete as informações.');
       } else {
-        setOcrError('Não foi possível identificar campos no documento. Tente uma imagem mais nítida.');
+        setOcrError('Não foi possível identificar campos válidos no documento. Por favor, preencha manualmente.');
+        console.warn('Dados do OCR inválidos:', { nome, cpf, rg });
       }
     } catch (err) {
       console.error('Erro no OCR:', err);
-      if (err.response?.status === 400) {
-        setOcrError('Formato de imagem não suportado. Use JPG ou PNG.');
-      } else if (err.response?.status === 413) {
-        setOcrError('Imagem muito grande. Tamanho máximo: 5MB.');
-      } else {
-        setOcrError('Erro ao processar documento. Tente novamente ou preencha manualmente.');
+      
+      let mensagemErro = 'Erro ao processar documento. Tente novamente ou preencha manualmente.';
+      
+      if (err.response) {
+        // Tratamento específico para diferentes tipos de erros da API
+        if (err.response.status === 400) {
+          mensagemErro = 'Formato de imagem inválido. Use JPG ou PNG.';
+        } else if (err.response.status === 413) {
+          mensagemErro = 'Imagem muito grande. Tamanho máximo: 5MB.';
+        } else if (err.response.data?.error) {
+          mensagemErro = `Erro no servidor: ${err.response.data.error}`;
+        }
+      } else if (err.message === 'Network Error') {
+        mensagemErro = 'Falha na conexão. Verifique sua internet e tente novamente.';
       }
+      
+      setOcrError(mensagemErro);
     } finally {
       setOcrLoading(false);
     }
@@ -208,9 +260,10 @@ export default function Cadastro() {
     try {
       let empresaId = formData.empresa_id;
 
+      // Se não selecionou empresa existente, criar nova
       if (!empresaId && formData.nova_empresa?.trim()) {
         empresaId = await criarEmpresa(formData.nova_empresa.trim());
-        await carregarEmpresas();
+        await carregarEmpresas(); // Recarregar lista de empresas
       }
 
       if (!empresaId) {
@@ -419,9 +472,13 @@ export default function Cadastro() {
                         Tentar novamente
                       </Button>
                     </div>
-                  ) : (
+                  ) : success ? (
                     <p className="text-sm text-green-600 mt-2">
-                      Dados extraídos com sucesso! Verifique abaixo
+                      {success}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-yellow-600 mt-2">
+                      Imagem pronta para processamento
                     </p>
                   )}
                 </div>
