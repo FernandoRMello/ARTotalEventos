@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Camera, Upload, User, Building, Hash, FileText, CheckCircle, AlertCircle } from 'lucide-react';
+import { Camera, Upload, User, Building, Hash, FileText, CheckCircle, AlertCircle, X } from 'lucide-react';
 import axios from '../lib/axios';
 
 export default function Cadastro() {
@@ -21,11 +21,27 @@ export default function Cadastro() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [imagemDocumento, setImagemDocumento] = useState(null);
+  const [showCameraModal, setShowCameraModal] = useState(false);
+  const [cameraStream, setCameraStream] = useState(null);
+  const [uploadMethod, setUploadMethod] = useState(null); // 'camera' ou 'gallery'
   const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
 
   useEffect(() => {
     carregarEmpresas();
+    // Limpar stream ao desmontar componente
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+    };
   }, []);
+
+  useEffect(() => {
+    if (showCameraModal && uploadMethod === 'camera') {
+      iniciarCamera();
+    }
+  }, [showCameraModal, uploadMethod]);
 
   const carregarEmpresas = async () => {
     try {
@@ -49,6 +65,55 @@ export default function Cadastro() {
     if (file) {
       setImagemDocumento(file);
       processarOCR(file);
+    }
+  };
+
+  const iniciarCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' } 
+      });
+      setCameraStream(stream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      setError('Não foi possível acessar a câmera. Verifique as permissões.');
+      setShowCameraModal(false);
+    }
+  };
+
+  const capturarImagem = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      
+      canvas.toBlob(blob => {
+        const file = new File([blob], 'documento-captura.png', { type: 'image/png' });
+        setImagemDocumento(file);
+        processarOCR(file);
+        setShowCameraModal(false);
+      }, 'image/png');
+    }
+  };
+
+  const pararCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+  };
+
+  const abrirOpcoesUpload = (method) => {
+    setUploadMethod(method);
+    
+    if (method === 'gallery') {
+      fileInputRef.current.click();
+    } else if (method === 'camera') {
+      setShowCameraModal(true);
     }
   };
 
@@ -174,6 +239,49 @@ export default function Cadastro() {
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
+      {/* Modal da Câmera */}
+      {showCameraModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-4 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold">Capturar Documento</h2>
+              <Button 
+                variant="ghost" 
+                size="icon"
+                onClick={() => {
+                  pararCamera();
+                  setShowCameraModal(false);
+                }}
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+            
+            <div className="relative bg-black rounded-lg overflow-hidden">
+              <video 
+                ref={videoRef} 
+                autoPlay 
+                playsInline 
+                className="w-full h-auto max-h-[60vh]"
+              />
+              
+              <div className="absolute bottom-4 left-0 right-0 flex justify-center">
+                <Button
+                  onClick={capturarImagem}
+                  className="bg-white text-black rounded-full h-16 w-16 flex items-center justify-center shadow-lg hover:bg-gray-100"
+                >
+                  <Camera className="h-8 w-8" />
+                </Button>
+              </div>
+            </div>
+            
+            <p className="text-center text-sm text-gray-500 mt-2">
+              Posicione o documento dentro do quadro e clique para capturar
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="text-center mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2 flex items-center justify-center gap-2">
           <User className="h-8 w-8 text-blue-600" />
@@ -193,7 +301,7 @@ export default function Cadastro() {
               OCR de Documento (Opcional)
             </CardTitle>
             <CardDescription>
-              Faça upload de uma foto do documento para extrair dados automaticamente
+              Capture uma foto do documento ou selecione uma imagem para extrair dados automaticamente
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -214,7 +322,7 @@ export default function Cadastro() {
                 <div className="space-y-2">
                   <Upload className="mx-auto h-12 w-12 text-gray-400" />
                   <p className="text-sm text-gray-600">
-                    Clique para selecionar uma imagem do documento
+                    Selecione como deseja carregar a imagem do documento
                   </p>
                 </div>
               )}
@@ -227,15 +335,28 @@ export default function Cadastro() {
                 className="hidden"
                 id="image-upload"
               />
-              <label htmlFor="image-upload">
+              
+              <div className="flex flex-col sm:flex-row gap-2 justify-center mt-4">
                 <Button 
                   variant="outline" 
-                  className="mt-2 cursor-pointer"
+                  className="flex items-center gap-2"
                   disabled={ocrLoading}
+                  onClick={() => abrirOpcoesUpload('camera')}
                 >
-                  {ocrLoading ? 'Processando...' : 'Selecionar Imagem'}
+                  <Camera className="h-4 w-4" />
+                  Usar Câmera
                 </Button>
-              </label>
+                
+                <Button 
+                  variant="outline" 
+                  className="flex items-center gap-2"
+                  disabled={ocrLoading}
+                  onClick={() => abrirOpcoesUpload('gallery')}
+                >
+                  <Upload className="h-4 w-4" />
+                  Galeria
+                </Button>
+              </div>
             </div>
 
             <div className="text-sm text-gray-500">
@@ -368,4 +489,3 @@ export default function Cadastro() {
     </div>
   );
 }
-
