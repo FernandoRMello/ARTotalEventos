@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Camera, Upload, User, Building, Hash, FileText, CheckCircle, AlertCircle, X } from 'lucide-react';
+import { Camera, Upload, User, FileText, CheckCircle, AlertCircle, X, RotateCw } from 'lucide-react';
 import axios from '../lib/axios';
 
 export default function Cadastro() {
@@ -22,14 +22,17 @@ export default function Cadastro() {
   const [success, setSuccess] = useState('');
   const [imagemDocumento, setImagemDocumento] = useState(null);
   const [showCameraModal, setShowCameraModal] = useState(false);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
-  const [uploadMethod, setUploadMethod] = useState(null); // 'camera' ou 'gallery'
+  const [uploadMethod, setUploadMethod] = useState(null);
+  const [ocrError, setOcrError] = useState('');
+  const [capturedImage, setCapturedImage] = useState(null);
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
+  const canvasRef = useRef(null);
 
   useEffect(() => {
     carregarEmpresas();
-    // Limpar stream ao desmontar componente
     return () => {
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
@@ -63,8 +66,7 @@ export default function Cadastro() {
   const handleImageSelect = (event) => {
     const file = event.target.files[0];
     if (file) {
-      setImagemDocumento(file);
-      processarOCR(file);
+      previewImage(file);
     }
   };
 
@@ -93,11 +95,23 @@ export default function Cadastro() {
       
       canvas.toBlob(blob => {
         const file = new File([blob], 'documento-captura.png', { type: 'image/png' });
-        setImagemDocumento(file);
-        processarOCR(file);
+        previewImage(file);
         setShowCameraModal(false);
       }, 'image/png');
     }
+  };
+
+  const previewImage = (file) => {
+    setCapturedImage(URL.createObjectURL(file));
+    setImagemDocumento(file);
+    setShowPreviewModal(true);
+  };
+
+  const processarImagemConfirmada = () => {
+    if (imagemDocumento) {
+      processarOCR(imagemDocumento);
+    }
+    setShowPreviewModal(false);
   };
 
   const pararCamera = () => {
@@ -117,9 +131,16 @@ export default function Cadastro() {
     }
   };
 
+  const reprocessarOCR = () => {
+    if (imagemDocumento) {
+      processarOCR(imagemDocumento);
+    }
+  };
+
   const processarOCR = async (file) => {
     setOcrLoading(true);
     setError('');
+    setOcrError('');
 
     const formDataOCR = new FormData();
     formDataOCR.append('documento', file);
@@ -145,10 +166,17 @@ export default function Cadastro() {
       if (nome || cpf || rg) {
         setSuccess('Dados extraídos do documento com sucesso! Verifique e complete as informações.');
       } else {
-        setError('Não foi possível extrair dados do documento. Preencha manualmente.');
+        setOcrError('Não foi possível identificar campos no documento. Tente uma imagem mais nítida.');
       }
     } catch (err) {
-      setError('Erro ao processar imagem do documento. Tente novamente ou preencha manualmente.');
+      console.error('Erro no OCR:', err);
+      if (err.response?.status === 400) {
+        setOcrError('Formato de imagem não suportado. Use JPG ou PNG.');
+      } else if (err.response?.status === 413) {
+        setOcrError('Imagem muito grande. Tamanho máximo: 5MB.');
+      } else {
+        setOcrError('Erro ao processar documento. Tente novamente ou preencha manualmente.');
+      }
     } finally {
       setOcrLoading(false);
     }
@@ -180,10 +208,9 @@ export default function Cadastro() {
     try {
       let empresaId = formData.empresa_id;
 
-      // Se não selecionou empresa existente, criar nova
       if (!empresaId && formData.nova_empresa?.trim()) {
         empresaId = await criarEmpresa(formData.nova_empresa.trim());
-        await carregarEmpresas(); // Recarregar lista de empresas
+        await carregarEmpresas();
       }
 
       if (!empresaId) {
@@ -208,6 +235,7 @@ export default function Cadastro() {
         empresa_id: ''
       });
       setImagemDocumento(null);
+      setCapturedImage(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -230,8 +258,10 @@ export default function Cadastro() {
       empresa_id: ''
     });
     setImagemDocumento(null);
+    setCapturedImage(null);
     setError('');
     setSuccess('');
+    setOcrError('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -282,6 +312,59 @@ export default function Cadastro() {
         </div>
       )}
 
+      {/* Modal de Pré-visualização */}
+      {showPreviewModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-4 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold">Pré-visualização</h2>
+              <Button 
+                variant="ghost" 
+                size="icon"
+                onClick={() => {
+                  setShowPreviewModal(false);
+                  setImagemDocumento(null);
+                  setCapturedImage(null);
+                }}
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+            
+            <div className="flex justify-center mb-4">
+              {capturedImage && (
+                <img 
+                  src={capturedImage} 
+                  alt="Documento capturado" 
+                  className="max-h-80 object-contain"
+                />
+              )}
+            </div>
+            
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                className="flex-1"
+                onClick={() => {
+                  setShowPreviewModal(false);
+                  setImagemDocumento(null);
+                  setCapturedImage(null);
+                  abrirOpcoesUpload(uploadMethod);
+                }}
+              >
+                Refazer
+              </Button>
+              <Button 
+                className="flex-1"
+                onClick={processarImagemConfirmada}
+              >
+                Usar esta imagem
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="text-center mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2 flex items-center justify-center gap-2">
           <User className="h-8 w-8 text-blue-600" />
@@ -306,15 +389,39 @@ export default function Cadastro() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-              {imagemDocumento ? (
+              {ocrLoading ? (
+                <div className="space-y-2">
+                  <div className="flex justify-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+                  </div>
+                  <p className="text-sm text-blue-600">
+                    Processando documento... Isso pode levar alguns segundos
+                  </p>
+                </div>
+              ) : imagemDocumento ? (
                 <div className="space-y-2">
                   <FileText className="mx-auto h-12 w-12 text-green-500" />
                   <p className="text-sm text-green-600">
                     Imagem carregada: {imagemDocumento.name}
                   </p>
-                  {ocrLoading && (
-                    <p className="text-sm text-blue-600">
-                      Processando OCR...
+                  {ocrError ? (
+                    <div className="mt-2">
+                      <Alert variant="destructive" className="mb-2">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription>{ocrError}</AlertDescription>
+                      </Alert>
+                      <Button 
+                        variant="outline" 
+                        onClick={reprocessarOCR}
+                        className="mt-2"
+                      >
+                        <RotateCw className="mr-2 h-4 w-4" />
+                        Tentar novamente
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-green-600 mt-2">
+                      Dados extraídos com sucesso! Verifique abaixo
                     </p>
                   )}
                 </div>
@@ -360,12 +467,12 @@ export default function Cadastro() {
             </div>
 
             <div className="text-sm text-gray-500">
-              <p><strong>Dica:</strong> Para melhores resultados:</p>
-              <ul className="list-disc list-inside mt-1 space-y-1">
-                <li>Use boa iluminação</li>
-                <li>Mantenha o documento reto</li>
-                <li>Evite reflexos e sombras</li>
-                <li>Certifique-se de que o texto está legível</li>
+              <p className="font-medium mb-1">Para melhores resultados:</p>
+              <ul className="list-disc list-inside space-y-1">
+                <li>Documentos oficiais (RG, CNH, CPF)</li>
+                <li>Fotos bem iluminadas e sem reflexos</li>
+                <li>Documento centralizado e preenchendo a imagem</li>
+                <li>Evite documentos dobrados ou com sombras</li>
               </ul>
             </div>
           </CardContent>
