@@ -1,22 +1,22 @@
-import express from 'express';
-import empresasRoutes from './routes/empresas.js';
-const db = require('../database/init');
+import express from 'express.js';
+const router = express.Router();
+import {  query  } from '../database/postgres.js';
 
 // Listar todas as empresas
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const empresas = db.prepare(`
+    const result = await query(`
       SELECT e.*, 
-             COUNT(p.id) as total_pessoas,
-             COUNT(c.id) as total_checkins
+             COUNT(DISTINCT p.id) as total_pessoas,
+             COUNT(DISTINCT c.id) as total_checkins
       FROM empresas e
       LEFT JOIN pessoas p ON e.id = p.empresa_id
       LEFT JOIN checkins c ON p.id = c.pessoa_id
-      GROUP BY e.id
+      GROUP BY e.id, e.nome, e.created_at, e.updated_at
       ORDER BY e.nome
-    `).all();
+    `);
 
-    res.json(empresas);
+    res.json(result.rows);
   } catch (error) {
     console.error('Erro ao listar empresas:', error);
     res.status(500).json({ error: 'Erro ao listar empresas' });
@@ -24,25 +24,25 @@ router.get('/', (req, res) => {
 });
 
 // Buscar empresa por ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const empresa = db.prepare(`
+    const result = await query(`
       SELECT e.*, 
-             COUNT(p.id) as total_pessoas,
-             COUNT(c.id) as total_checkins
+             COUNT(DISTINCT p.id) as total_pessoas,
+             COUNT(DISTINCT c.id) as total_checkins
       FROM empresas e
       LEFT JOIN pessoas p ON e.id = p.empresa_id
       LEFT JOIN checkins c ON p.id = c.pessoa_id
-      WHERE e.id = ?
-      GROUP BY e.id
-    `).get(id);
+      WHERE e.id = $1
+      GROUP BY e.id, e.nome, e.created_at, e.updated_at
+    `, [id]);
 
-    if (!empresa) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Empresa não encontrada' });
     }
 
-    res.json(empresa);
+    res.json(result.rows[0]);
   } catch (error) {
     console.error('Erro ao buscar empresa:', error);
     res.status(500).json({ error: 'Erro ao buscar empresa' });
@@ -50,75 +50,86 @@ router.get('/:id', (req, res) => {
 });
 
 // Criar nova empresa
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { nome } = req.body;
 
-    if (!nome || nome.trim() === '') {
+    if (!nome) {
       return res.status(400).json({ error: 'Nome da empresa é obrigatório' });
     }
 
-    const stmt = db.prepare('INSERT INTO empresas (nome) VALUES (?)');
-    const result = stmt.run(nome.trim());
+    const result = await query(`
+      INSERT INTO empresas (nome) 
+      VALUES ($1) 
+      RETURNING *
+    `, [nome]);
 
-    const empresa = db.prepare('SELECT * FROM empresas WHERE id = ?').get(result.lastInsertRowid);
-
-    res.status(201).json(empresa);
+    res.status(201).json(result.rows[0]);
   } catch (error) {
-    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-      return res.status(409).json({ error: 'Empresa já existe' });
-    }
     console.error('Erro ao criar empresa:', error);
+    
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'Empresa com este nome já existe' });
+    }
+    
     res.status(500).json({ error: 'Erro ao criar empresa' });
   }
 });
 
 // Atualizar empresa
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { nome } = req.body;
 
-    if (!nome || nome.trim() === '') {
+    if (!nome) {
       return res.status(400).json({ error: 'Nome da empresa é obrigatório' });
     }
 
-    const stmt = db.prepare('UPDATE empresas SET nome = ? WHERE id = ?');
-    const result = stmt.run(nome.trim(), id);
+    const result = await query(`
+      UPDATE empresas 
+      SET nome = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2 
+      RETURNING *
+    `, [nome, id]);
 
-    if (result.changes === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Empresa não encontrada' });
     }
 
-    const empresa = db.prepare('SELECT * FROM empresas WHERE id = ?').get(id);
-    res.json(empresa);
+    res.json(result.rows[0]);
   } catch (error) {
-    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-      return res.status(409).json({ error: 'Empresa já existe' });
-    }
     console.error('Erro ao atualizar empresa:', error);
+    
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'Empresa com este nome já existe' });
+    }
+    
     res.status(500).json({ error: 'Erro ao atualizar empresa' });
   }
 });
 
 // Deletar empresa
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Verificar se há pessoas vinculadas
-    const pessoasCount = db.prepare('SELECT COUNT(*) as count FROM pessoas WHERE empresa_id = ?').get(id);
-    
-    if (pessoasCount.count > 0) {
-      return res.status(409).json({ 
+    // Verificar se existem pessoas vinculadas
+    const pessoasResult = await query(`
+      SELECT COUNT(*) as count FROM pessoas WHERE empresa_id = $1
+    `, [id]);
+
+    if (parseInt(pessoasResult.rows[0].count) > 0) {
+      return res.status(400).json({ 
         error: 'Não é possível deletar empresa com pessoas cadastradas' 
       });
     }
 
-    const stmt = db.prepare('DELETE FROM empresas WHERE id = ?');
-    const result = stmt.run(id);
+    const result = await query(`
+      DELETE FROM empresas WHERE id = $1 RETURNING *
+    `, [id]);
 
-    if (result.changes === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Empresa não encontrada' });
     }
 
@@ -129,5 +140,5 @@ router.delete('/:id', (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;
 

@@ -1,41 +1,20 @@
-const express = require('express');
+import express from 'express.js';
 const router = express.Router();
-const db = require('../database/init');
+import {  query  } from '../database/postgres.js';
 
 // Listar todos os check-ins
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const { empresa_id, data_inicio, data_fim } = req.query;
-    
-    let query = `
-      SELECT c.*, p.nome, p.documento, p.setor, e.nome as empresa_nome
+    const result = await query(`
+      SELECT c.*, p.nome as pessoa_nome, p.documento, p.setor,
+             e.nome as empresa_nome
       FROM checkins c
       JOIN pessoas p ON c.pessoa_id = p.id
       JOIN empresas e ON p.empresa_id = e.id
-      WHERE 1=1
-    `;
-    
-    const params = [];
-    
-    if (empresa_id) {
-      query += ' AND p.empresa_id = ?';
-      params.push(empresa_id);
-    }
-    
-    if (data_inicio) {
-      query += ' AND DATE(c.checkin_at) >= DATE(?)';
-      params.push(data_inicio);
-    }
-    
-    if (data_fim) {
-      query += ' AND DATE(c.checkin_at) <= DATE(?)';
-      params.push(data_fim);
-    }
-    
-    query += ' ORDER BY c.checkin_at DESC';
-    
-    const checkins = db.prepare(query).all(...params);
-    res.json(checkins);
+      ORDER BY c.checkin_at DESC
+    `);
+
+    res.json(result.rows);
   } catch (error) {
     console.error('Erro ao listar check-ins:', error);
     res.status(500).json({ error: 'Erro ao listar check-ins' });
@@ -43,149 +22,132 @@ router.get('/', (req, res) => {
 });
 
 // Buscar check-in por ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const checkin = db.prepare(`
-      SELECT c.*, p.nome, p.documento, p.setor, e.nome as empresa_nome
+    const result = await query(`
+      SELECT c.*, p.nome as pessoa_nome, p.documento, p.setor,
+             e.nome as empresa_nome
       FROM checkins c
       JOIN pessoas p ON c.pessoa_id = p.id
       JOIN empresas e ON p.empresa_id = e.id
-      WHERE c.id = ?
-    `).get(id);
+      WHERE c.id = $1
+    `, [id]);
 
-    if (!checkin) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Check-in não encontrado' });
     }
 
-    res.json(checkin);
+    res.json(result.rows[0]);
   } catch (error) {
     console.error('Erro ao buscar check-in:', error);
     res.status(500).json({ error: 'Erro ao buscar check-in' });
   }
 });
 
-// Realizar check-in
-router.post('/', (req, res) => {
+// Buscar check-ins de uma pessoa
+router.get('/pessoa/:pessoaId', async (req, res) => {
   try {
-    const { documento, pulseira } = req.body;
+    const { pessoaId } = req.params;
+    const result = await query(`
+      SELECT c.*, p.nome as pessoa_nome, p.documento, p.setor,
+             e.nome as empresa_nome
+      FROM checkins c
+      JOIN pessoas p ON c.pessoa_id = p.id
+      JOIN empresas e ON p.empresa_id = e.id
+      WHERE c.pessoa_id = $1
+      ORDER BY c.checkin_at DESC
+    `, [pessoaId]);
 
-    // Validações
-    if (!documento || documento.trim() === '') {
-      return res.status(400).json({ error: 'Documento é obrigatório' });
-    }
-    
-    if (!pulseira || pulseira.trim() === '') {
-      return res.status(400).json({ error: 'Número da pulseira é obrigatório' });
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Erro ao buscar check-ins da pessoa:', error);
+    res.status(500).json({ error: 'Erro ao buscar check-ins da pessoa' });
+  }
+});
+
+// Realizar check-in
+router.post('/', async (req, res) => {
+  try {
+    const { pessoa_id, pulseira } = req.body;
+
+    if (!pessoa_id || !pulseira) {
+      return res.status(400).json({ 
+        error: 'ID da pessoa e número da pulseira são obrigatórios' 
+      });
     }
 
-    // Buscar pessoa pelo documento
-    const pessoa = db.prepare(`
+    // Verificar se pessoa existe
+    const pessoaResult = await query(`
       SELECT p.*, e.nome as empresa_nome
       FROM pessoas p
       JOIN empresas e ON p.empresa_id = e.id
-      WHERE p.documento = ?
-    `).get(documento.trim());
+      WHERE p.id = $1
+    `, [pessoa_id]);
 
-    if (!pessoa) {
+    if (pessoaResult.rows.length === 0) {
       return res.status(404).json({ error: 'Pessoa não encontrada' });
     }
 
     // Verificar se já fez check-in
-    const checkinExistente = db.prepare('SELECT id FROM checkins WHERE pessoa_id = ?').get(pessoa.id);
-    if (checkinExistente) {
-      return res.status(409).json({ error: 'Check-in já realizado para esta pessoa' });
+    const checkinExistente = await query(`
+      SELECT id FROM checkins WHERE pessoa_id = $1
+    `, [pessoa_id]);
+
+    if (checkinExistente.rows.length > 0) {
+      return res.status(400).json({ error: 'Pessoa já realizou check-in' });
     }
 
     // Verificar se pulseira já foi usada
-    const pulseiraExistente = db.prepare('SELECT id FROM checkins WHERE pulseira = ?').get(pulseira.trim());
-    if (pulseiraExistente) {
-      return res.status(409).json({ error: 'Número de pulseira já utilizado' });
+    const pulseiraExistente = await query(`
+      SELECT id FROM checkins WHERE pulseira = $1
+    `, [pulseira]);
+
+    if (pulseiraExistente.rows.length > 0) {
+      return res.status(400).json({ error: 'Pulseira já foi utilizada' });
     }
 
     // Realizar check-in
-    const stmt = db.prepare('INSERT INTO checkins (pessoa_id, pulseira) VALUES (?, ?)');
-    const result = stmt.run(pessoa.id, pulseira.trim());
+    const result = await query(`
+      INSERT INTO checkins (pessoa_id, pulseira) 
+      VALUES ($1, $2) 
+      RETURNING *
+    `, [pessoa_id, pulseira]);
 
-    // Buscar check-in criado com dados completos
-    const checkin = db.prepare(`
-      SELECT c.*, p.nome, p.documento, p.setor, e.nome as empresa_nome
+    // Buscar dados completos do check-in
+    const checkinCompleto = await query(`
+      SELECT c.*, p.nome as pessoa_nome, p.documento, p.setor,
+             e.nome as empresa_nome
       FROM checkins c
       JOIN pessoas p ON c.pessoa_id = p.id
       JOIN empresas e ON p.empresa_id = e.id
-      WHERE c.id = ?
-    `).get(result.lastInsertRowid);
+      WHERE c.id = $1
+    `, [result.rows[0].id]);
 
-    // Buscar posição da pessoa no grupo da empresa
-    const posicao = db.prepare(`
-      SELECT 
-        (SELECT COUNT(*) FROM pessoas WHERE empresa_id = ? AND id <= ?) as posicao,
-        (SELECT COUNT(*) FROM pessoas WHERE empresa_id = ?) as total
-    `).get(pessoa.empresa_id, pessoa.id, pessoa.empresa_id);
-
-    res.status(201).json({
-      ...checkin,
-      posicao_grupo: `${posicao.posicao} de ${posicao.total}`,
-      message: 'Check-in realizado com sucesso!'
-    });
+    res.status(201).json(checkinCompleto.rows[0]);
   } catch (error) {
     console.error('Erro ao realizar check-in:', error);
+    
+    if (error.code === '23505') { // Unique violation
+      if (error.constraint && error.constraint.includes('pulseira')) {
+        return res.status(400).json({ error: 'Pulseira já foi utilizada' });
+      }
+    }
+    
     res.status(500).json({ error: 'Erro ao realizar check-in' });
   }
 });
 
-// Verificar status de check-in por documento
-router.get('/status/:documento', (req, res) => {
-  try {
-    const { documento } = req.params;
-    
-    const resultado = db.prepare(`
-      SELECT 
-        p.id, p.nome, p.documento, p.setor, e.nome as empresa_nome,
-        CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END as checkin_realizado,
-        c.pulseira, c.checkin_at
-      FROM pessoas p
-      JOIN empresas e ON p.empresa_id = e.id
-      LEFT JOIN checkins c ON p.id = c.pessoa_id
-      WHERE p.documento = ?
-    `).get(documento);
-
-    if (!resultado) {
-      return res.status(404).json({ error: 'Pessoa não encontrada' });
-    }
-
-    // Se já fez check-in, buscar posição no grupo
-    let posicao_grupo = null;
-    if (resultado.checkin_realizado) {
-      const posicao = db.prepare(`
-        SELECT 
-          (SELECT COUNT(*) FROM pessoas WHERE empresa_id = ? AND id <= ?) as posicao,
-          (SELECT COUNT(*) FROM pessoas WHERE empresa_id = ?) as total
-      `).get(resultado.empresa_id, resultado.id, resultado.empresa_id);
-      
-      posicao_grupo = `${posicao.posicao} de ${posicao.total}`;
-    }
-
-    res.json({
-      ...resultado,
-      posicao_grupo
-    });
-  } catch (error) {
-    console.error('Erro ao verificar status:', error);
-    res.status(500).json({ error: 'Erro ao verificar status' });
-  }
-});
-
 // Cancelar check-in (apenas para casos especiais)
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const stmt = db.prepare('DELETE FROM checkins WHERE id = ?');
-    const result = stmt.run(id);
+    const result = await query(`
+      DELETE FROM checkins WHERE id = $1 RETURNING *
+    `, [id]);
 
-    if (result.changes === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Check-in não encontrado' });
     }
 
@@ -196,5 +158,32 @@ router.delete('/:id', (req, res) => {
   }
 });
 
-module.exports = router;
+// Estatísticas de check-ins
+router.get('/stats/geral', async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT 
+        COUNT(DISTINCT c.id) as total_checkins,
+        COUNT(DISTINCT p.id) as total_pessoas_checkin,
+        COUNT(DISTINCT e.id) as total_empresas_checkin,
+        (SELECT COUNT(*) FROM pessoas) as total_pessoas_cadastradas,
+        (SELECT COUNT(*) FROM empresas) as total_empresas_cadastradas
+      FROM checkins c
+      JOIN pessoas p ON c.pessoa_id = p.id
+      JOIN empresas e ON p.empresa_id = e.id
+    `);
+
+    const stats = result.rows[0];
+    stats.percentual_checkin = stats.total_pessoas_cadastradas > 0 
+      ? ((stats.total_pessoas_checkin / stats.total_pessoas_cadastradas) * 100).toFixed(2)
+      : 0;
+
+    res.json(stats);
+  } catch (error) {
+    console.error('Erro ao buscar estatísticas:', error);
+    res.status(500).json({ error: 'Erro ao buscar estatísticas' });
+  }
+});
+
+export default router;
 

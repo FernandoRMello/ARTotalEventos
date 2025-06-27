@@ -1,13 +1,13 @@
-const express = require('express');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const XLSX = require('xlsx');
-const Tesseract = require('tesseract.js');
+import express from 'express.js';
 const router = express.Router();
-const db = require('../database/init');
+import multer from 'multer.js';
+import path from 'path.js';
+import fs from 'fs.js';
+import XLSX from 'xlsx.js';
+import Tesseract from 'tesseract.js';
+import {  query  } from '../database/postgres.js';
 
-// Configurar multer para upload de arquivos
+// Configuração do multer para upload de arquivos
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = path.join(__dirname, '../uploads');
@@ -25,143 +25,219 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB
+    fileSize: 10 * 1024 * 1024 // 10MB
   },
   fileFilter: (req, file, cb) => {
     if (file.fieldname === 'excel') {
-      const allowedTypes = [
+      // Aceitar arquivos Excel
+      const allowedMimes = [
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'application/vnd.ms-excel',
-        'application/octet-stream' // Adicionar para casos onde MIME type não é detectado
+        'application/octet-stream'
       ];
-      const allowedExtensions = ['.xlsx', '.xls'];
-      const fileExtension = path.extname(file.originalname).toLowerCase();
+      const allowedExts = ['.xlsx', '.xls'];
+      const ext = path.extname(file.originalname).toLowerCase();
       
-      if (allowedTypes.includes(file.mimetype) || allowedExtensions.includes(fileExtension)) {
+      if (allowedMimes.includes(file.mimetype) || allowedExts.includes(ext)) {
         cb(null, true);
       } else {
         cb(new Error('Apenas arquivos Excel (.xlsx, .xls) são permitidos'));
       }
     } else if (file.fieldname === 'documento') {
-      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
-      if (allowedTypes.includes(file.mimetype)) {
+      // Aceitar imagens para OCR
+      const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
+      if (allowedMimes.includes(file.mimetype)) {
         cb(null, true);
       } else {
         cb(new Error('Apenas imagens (JPEG, PNG, GIF) são permitidas'));
       }
     } else {
-      cb(new Error('Campo de arquivo inválido'));
+      cb(new Error('Campo de arquivo não reconhecido'));
     }
   }
 });
 
-// Importar dados do Excel
-router.post('/excel', upload.single('excel'), async (req, res) => {
+// Validar arquivo Excel
+router.post('/excel/validar', upload.single('excel'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'Arquivo Excel é obrigatório' });
+      return res.status(400).json({ error: 'Nenhum arquivo foi enviado' });
     }
 
-    const filePath = req.file.path;
-    const workbook = XLSX.readFile(filePath);
+    const workbook = XLSX.readFile(req.file.path);
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const data = XLSX.utils.sheet_to_json(worksheet);
 
+    // Validar estrutura
     if (data.length === 0) {
-      fs.unlinkSync(filePath); // Remover arquivo
       return res.status(400).json({ error: 'Planilha está vazia' });
     }
 
-    const resultados = {
-      total_linhas: data.length,
-      empresas_criadas: 0,
-      pessoas_criadas: 0,
-      pessoas_duplicadas: 0,
-      erros: []
-    };
+    const requiredFields = ['nome', 'documento', 'empresa'];
+    const firstRow = data[0];
+    const missingFields = requiredFields.filter(field => !(field in firstRow));
 
-    // Processar cada linha
-    for (let i = 0; i < data.length; i++) {
-      const linha = data[i];
-      const numeroLinha = i + 2; // +2 porque começa na linha 2 do Excel
-
-      try {
-        // Validar campos obrigatórios
-        const nome = linha.nome || linha.Nome || linha.NOME;
-        const documento = linha.documento || linha.Documento || linha.DOCUMENTO || 
-                         linha.cpf || linha.CPF || linha.rg || linha.RG;
-        const setor = linha.setor || linha.Setor || linha.SETOR;
-        const empresa = linha.empresa || linha.Empresa || linha.EMPRESA;
-
-        if (!nome || !documento || !empresa) {
-          resultados.erros.push({
-            linha: numeroLinha,
-            erro: 'Campos obrigatórios: nome, documento, empresa'
-          });
-          continue;
-        }
-
-        // Criar ou buscar empresa
-        let empresaId;
-        const empresaExistente = db.prepare('SELECT id FROM empresas WHERE nome = ?').get(empresa.trim());
-        
-        if (empresaExistente) {
-          empresaId = empresaExistente.id;
-        } else {
-          const stmtEmpresa = db.prepare('INSERT INTO empresas (nome) VALUES (?)');
-          const resultEmpresa = stmtEmpresa.run(empresa.trim());
-          empresaId = resultEmpresa.lastInsertRowid;
-          resultados.empresas_criadas++;
-        }
-
-        // Criar pessoa
-        const stmtPessoa = db.prepare(`
-          INSERT INTO pessoas (nome, documento, setor, empresa_id) 
-          VALUES (?, ?, ?, ?)
-        `);
-        
-        stmtPessoa.run(
-          nome.trim(),
-          documento.toString().trim(),
-          setor ? setor.trim() : null,
-          empresaId
-        );
-        
-        resultados.pessoas_criadas++;
-
-      } catch (error) {
-        if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-          resultados.pessoas_duplicadas++;
-          resultados.erros.push({
-            linha: numeroLinha,
-            erro: 'Documento já cadastrado'
-          });
-        } else {
-          resultados.erros.push({
-            linha: numeroLinha,
-            erro: error.message
-          });
-        }
-      }
+    if (missingFields.length > 0) {
+      return res.status(400).json({ 
+        error: `Campos obrigatórios ausentes: ${missingFields.join(', ')}`,
+        required: requiredFields,
+        found: Object.keys(firstRow)
+      });
     }
 
-    // Remover arquivo após processamento
-    fs.unlinkSync(filePath);
+    // Validar dados
+    const errors = [];
+    const empresas = new Set();
+    const documentos = new Set();
+
+    data.forEach((row, index) => {
+      const rowNum = index + 2; // +2 porque começa do 1 e pula o cabeçalho
+
+      if (!row.nome || row.nome.trim() === '') {
+        errors.push(`Linha ${rowNum}: Nome é obrigatório`);
+      }
+
+      if (!row.documento || row.documento.toString().trim() === '') {
+        errors.push(`Linha ${rowNum}: Documento é obrigatório`);
+      } else {
+        const doc = row.documento.toString().trim();
+        if (documentos.has(doc)) {
+          errors.push(`Linha ${rowNum}: Documento ${doc} duplicado na planilha`);
+        }
+        documentos.add(doc);
+      }
+
+      if (!row.empresa || row.empresa.trim() === '') {
+        errors.push(`Linha ${rowNum}: Empresa é obrigatória`);
+      } else {
+        empresas.add(row.empresa.trim());
+      }
+    });
+
+    // Verificar documentos já existentes no banco
+    if (documentos.size > 0) {
+      const docsArray = Array.from(documentos);
+      const placeholders = docsArray.map((_, i) => `$${i + 1}`).join(',');
+      
+      const existingDocsResult = await query(`
+        SELECT documento FROM pessoas WHERE documento IN (${placeholders})
+      `, docsArray);
+
+      existingDocsResult.rows.forEach(row => {
+        errors.push(`Documento ${row.documento} já existe no sistema`);
+      });
+    }
+
+    // Limpar arquivo temporário
+    fs.unlinkSync(req.file.path);
+
+    if (errors.length > 0) {
+      return res.status(400).json({ 
+        error: 'Erros encontrados na validação',
+        errors: errors.slice(0, 10), // Limitar a 10 erros
+        total_errors: errors.length
+      });
+    }
 
     res.json({
-      message: 'Importação concluída',
-      resultados
+      message: 'Arquivo válido',
+      total_registros: data.length,
+      empresas_encontradas: Array.from(empresas),
+      preview: data.slice(0, 5) // Mostrar apenas os primeiros 5 registros
     });
 
   } catch (error) {
-    // Remover arquivo em caso de erro
+    // Limpar arquivo em caso de erro
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
     
-    console.error('Erro na importação Excel:', error);
+    console.error('Erro ao validar Excel:', error);
     res.status(500).json({ error: 'Erro ao processar arquivo Excel' });
+  }
+});
+
+// Importar arquivo Excel
+router.post('/excel', upload.single('excel'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Nenhum arquivo foi enviado' });
+    }
+
+    const workbook = XLSX.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet);
+
+    let empresasCriadas = 0;
+    let pessoasCriadas = 0;
+    const errors = [];
+
+    // Processar cada linha
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const rowNum = i + 2;
+
+      try {
+        // Verificar/criar empresa
+        let empresaResult = await query(`
+          SELECT id FROM empresas WHERE nome = $1
+        `, [row.empresa.trim()]);
+
+        let empresaId;
+        if (empresaResult.rows.length === 0) {
+          // Criar nova empresa
+          const novaEmpresaResult = await query(`
+            INSERT INTO empresas (nome) VALUES ($1) RETURNING id
+          `, [row.empresa.trim()]);
+          empresaId = novaEmpresaResult.rows[0].id;
+          empresasCriadas++;
+        } else {
+          empresaId = empresaResult.rows[0].id;
+        }
+
+        // Criar pessoa
+        await query(`
+          INSERT INTO pessoas (nome, documento, setor, empresa_id) 
+          VALUES ($1, $2, $3, $4)
+        `, [
+          row.nome.trim(),
+          row.documento.toString().trim(),
+          row.setor ? row.setor.trim() : null,
+          empresaId
+        ]);
+        pessoasCriadas++;
+
+      } catch (error) {
+        console.error(`Erro na linha ${rowNum}:`, error);
+        if (error.code === '23505') { // Unique violation
+          errors.push(`Linha ${rowNum}: Documento ${row.documento} já existe`);
+        } else {
+          errors.push(`Linha ${rowNum}: ${error.message}`);
+        }
+      }
+    }
+
+    // Limpar arquivo temporário
+    fs.unlinkSync(req.file.path);
+
+    res.json({
+      message: 'Importação concluída',
+      empresas_criadas: empresasCriadas,
+      pessoas_criadas: pessoasCriadas,
+      total_processados: data.length,
+      errors: errors
+    });
+
+  } catch (error) {
+    // Limpar arquivo em caso de erro
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    console.error('Erro ao importar Excel:', error);
+    res.status(500).json({ error: 'Erro ao importar arquivo Excel' });
   }
 });
 
@@ -169,154 +245,97 @@ router.post('/excel', upload.single('excel'), async (req, res) => {
 router.post('/ocr', upload.single('documento'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'Imagem do documento é obrigatória' });
+      return res.status(400).json({ error: 'Nenhuma imagem foi enviada' });
     }
 
-    const filePath = req.file.path;
+    console.log('Processando OCR para:', req.file.filename);
 
     // Processar OCR
-    const { data: { text } } = await Tesseract.recognize(filePath, 'por', {
+    const { data: { text } } = await Tesseract.recognize(req.file.path, 'por', {
       logger: m => console.log(m)
     });
 
-    // Extrair informações do texto
-    const resultado = {
-      texto_completo: text,
-      nome: null,
-      cpf: null,
-      rg: null
-    };
-
-    // Regex para CPF (xxx.xxx.xxx-xx ou xxxxxxxxxxx)
-    const cpfRegex = /(\d{3}\.?\d{3}\.?\d{3}-?\d{2})/g;
-    const cpfMatch = text.match(cpfRegex);
-    if (cpfMatch) {
-      resultado.cpf = cpfMatch[0].replace(/[^\d]/g, '');
-    }
-
-    // Regex para RG (xx.xxx.xxx-x ou xxxxxxxx)
-    const rgRegex = /(\d{1,2}\.?\d{3}\.?\d{3}-?\d{1})/g;
-    const rgMatch = text.match(rgRegex);
-    if (rgMatch) {
-      resultado.rg = rgMatch[0].replace(/[^\d]/g, '');
-    }
-
-    // Tentar extrair nome (linha mais longa que não seja número)
-    const linhas = text.split('\n').map(linha => linha.trim()).filter(linha => linha.length > 0);
-    for (const linha of linhas) {
-      if (linha.length > 10 && !/^\d+$/.test(linha) && /^[A-Za-zÀ-ÿ\s]+$/.test(linha)) {
-        resultado.nome = linha;
+    // Extrair informações básicas
+    const lines = text.split('\n').filter(line => line.trim().length > 0);
+    
+    // Tentar extrair nome (geralmente nas primeiras linhas)
+    let nome = '';
+    for (let i = 0; i < Math.min(5, lines.length); i++) {
+      const line = lines[i].trim();
+      if (line.length > 5 && /^[A-ZÁÊÇÕ\s]+$/.test(line)) {
+        nome = line;
         break;
       }
     }
 
-    // Remover arquivo após processamento
-    fs.unlinkSync(filePath);
+    // Tentar extrair CPF (padrão XXX.XXX.XXX-XX ou XXXXXXXXXXX)
+    let cpf = '';
+    const cpfRegex = /(\d{3}\.?\d{3}\.?\d{3}-?\d{2})/g;
+    const cpfMatch = text.match(cpfRegex);
+    if (cpfMatch) {
+      cpf = cpfMatch[0].replace(/[^\d]/g, ''); // Remover pontuação
+    }
 
-    res.json(resultado);
+    // Limpar arquivo temporário
+    fs.unlinkSync(req.file.path);
+
+    res.json({
+      texto_completo: text,
+      nome_extraido: nome,
+      cpf_extraido: cpf,
+      linhas_processadas: lines.length
+    });
 
   } catch (error) {
-    // Remover arquivo em caso de erro
+    // Limpar arquivo em caso de erro
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
     
     console.error('Erro no OCR:', error);
-    res.status(500).json({ error: 'Erro ao processar imagem do documento' });
+    res.status(500).json({ error: 'Erro ao processar OCR do documento' });
   }
 });
 
-// Validar planilha Excel antes da importação
-router.post('/excel/validar', upload.single('excel'), (req, res) => {
+// Download do template Excel
+router.get('/template', (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Arquivo Excel é obrigatório' });
-    }
-
-    const filePath = req.file.path;
-    const workbook = XLSX.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(worksheet);
-
-    // Remover arquivo após leitura
-    fs.unlinkSync(filePath);
-
-    if (data.length === 0) {
-      return res.status(400).json({ error: 'Planilha está vazia' });
-    }
-
-    const validacao = {
-      total_linhas: data.length,
-      colunas_encontradas: Object.keys(data[0]),
-      colunas_obrigatorias: ['nome', 'documento', 'empresa'],
-      linhas_validas: 0,
-      linhas_invalidas: 0,
-      erros: []
-    };
-
-    // Verificar se tem as colunas obrigatórias (case insensitive)
-    const colunasLower = validacao.colunas_encontradas.map(col => col.toLowerCase());
-    const colunasObrigatorias = ['nome', 'documento', 'empresa'];
-    const colunasFaltando = [];
-
-    for (const coluna of colunasObrigatorias) {
-      const variantes = [coluna, coluna.toUpperCase(), 
-                        coluna === 'documento' ? 'cpf' : null,
-                        coluna === 'documento' ? 'rg' : null].filter(Boolean);
-      
-      const encontrou = variantes.some(variante => 
-        colunasLower.includes(variante.toLowerCase())
-      );
-      
-      if (!encontrou) {
-        colunasFaltando.push(coluna);
+    // Criar dados de exemplo
+    const templateData = [
+      {
+        nome: 'João Silva Santos',
+        documento: '12345678901',
+        empresa: 'Empresa Exemplo Ltda',
+        setor: 'Tecnologia'
+      },
+      {
+        nome: 'Maria Oliveira Costa',
+        documento: '98765432100',
+        empresa: 'Outra Empresa S.A.',
+        setor: 'Marketing'
       }
-    }
+    ];
 
-    if (colunasFaltando.length > 0) {
-      return res.status(400).json({
-        error: `Colunas obrigatórias não encontradas: ${colunasFaltando.join(', ')}`,
-        validacao
-      });
-    }
+    // Criar workbook
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(templateData);
 
-    // Validar cada linha
-    for (let i = 0; i < Math.min(data.length, 100); i++) { // Validar apenas primeiras 100 linhas
-      const linha = data[i];
-      const numeroLinha = i + 2;
+    // Adicionar worksheet ao workbook
+    XLSX.utils.book_append_sheet(wb, ws, 'Pessoas');
 
-      const nome = linha.nome || linha.Nome || linha.NOME;
-      const documento = linha.documento || linha.Documento || linha.DOCUMENTO || 
-                       linha.cpf || linha.CPF || linha.rg || linha.RG;
-      const empresa = linha.empresa || linha.Empresa || linha.EMPRESA;
+    // Gerar buffer
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-      if (!nome || !documento || !empresa) {
-        validacao.linhas_invalidas++;
-        validacao.erros.push({
-          linha: numeroLinha,
-          erro: 'Campos obrigatórios em branco'
-        });
-      } else {
-        validacao.linhas_validas++;
-      }
-    }
+    // Configurar headers para download
+    res.setHeader('Content-Disposition', 'attachment; filename=template-importacao.xlsx');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 
-    res.json({
-      message: 'Validação concluída',
-      validacao
-    });
-
+    res.send(buffer);
   } catch (error) {
-    // Remover arquivo em caso de erro
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-    
-    console.error('Erro na validação Excel:', error);
-    res.status(500).json({ error: 'Erro ao validar arquivo Excel' });
+    console.error('Erro ao gerar template:', error);
+    res.status(500).json({ error: 'Erro ao gerar template' });
   }
 });
 
-module.exports = router;
+export default router;
 
