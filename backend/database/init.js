@@ -1,6 +1,11 @@
+import { neon } from '@netlify/neon';
+const sql = neon(); // automatically uses env NETLIFY_DATABASE_URL
+const [post] = await sql`SELECT * FROM posts WHERE id = ${postId}`;
+
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+
 
 // Criar diretório do banco se não existir
 const dbDir = path.join(__dirname, '../data');
