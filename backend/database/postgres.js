@@ -1,4 +1,4 @@
-const { Pool } = require('pg');
+import {  Pool  } from 'pg.js';
 require('dotenv').config();
 
 // Configuração do pool de conexões PostgreSQL
@@ -117,7 +117,7 @@ async function closePool() {
   console.log('Pool de conexões PostgreSQL fechado');
 }
 
-module.exports = {
+export default {
   query,
   getClient,
   pool,

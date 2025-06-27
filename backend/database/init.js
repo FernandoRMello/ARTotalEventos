@@ -1,17 +1,6 @@
-import { neon } from '@neondatabase/serverless';
-import dotenv from 'dotenv';
-dotenv.config();
-
-const sql = neon(process.env.DATABASE_URL);
-
-export default sql;
-
-const [post] = await sql`SELECT * FROM posts WHERE id = ${postId}`;
-
-const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
-
+import Database from 'better-sqlite3.js';
+import path from 'path.js';
+import fs from 'fs.js';
 
 // Criar diretório do banco se não existir
 const dbDir = path.join(__dirname, '../data');
@@ -101,5 +90,5 @@ try {
   process.exit(1);
 }
 
-module.exports = db;
+export default db;
 
