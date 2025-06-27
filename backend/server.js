@@ -81,7 +81,7 @@ app.use((err, req, res, next) => {
 
 // Função para obter IP local
 function getLocalIP() {
-  import {  networkInterfaces  } from 'os.js';
+  import { networkInterfaces } from 'os';
   const nets = networkInterfaces();
   const results = [];
 
