@@ -1,10 +1,12 @@
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const path = require('path');
-const fs = require('fs');
+import express from 'express.js';
+import cors from 'cors.js';
+import helmet from 'helmet.js';
+import morgan from 'morgan.js';
+import path from 'path.js';
+import fs from 'fs.js';
 require('dotenv').config();
+
+import {  initializeTables, testConnection  } from './database/postgres.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -31,11 +33,11 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 // Importar rotas
-const empresasRoutes = require('./routes/empresas');
-const pessoasRoutes = require('./routes/pessoas');
-const checkinsRoutes = require('./routes/checkins');
-const relatoriosRoutes = require('./routes/relatorios');
-const uploadRoutes = require('./routes/upload');
+import empresasRoutes from './routes/empresas.js';
+import pessoasRoutes from './routes/pessoas.js';
+import checkinsRoutes from './routes/checkins.js';
+import relatoriosRoutes from './routes/relatorios.js';
+import uploadRoutes from './routes/upload.js';
 
 // Usar rotas
 app.use('/api/empresas', empresasRoutes);
@@ -43,6 +45,25 @@ app.use('/api/pessoas', pessoasRoutes);
 app.use('/api/checkins', checkinsRoutes);
 app.use('/api/relatorios', relatoriosRoutes);
 app.use('/api/upload', uploadRoutes);
+
+// Rota de health check
+app.get('/health', async (req, res) => {
+  try {
+    const dbConnected = await testConnection();
+    res.json({ 
+      status: 'ok', 
+      timestamp: new Date().toISOString(),
+      database: dbConnected ? 'PostgreSQL connected' : 'PostgreSQL disconnected',
+      environment: process.env.NODE_ENV || 'development'
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: 'Database connection failed',
+      error: error.message
+    });
+  }
+});
 
 // Rota para servir o frontend React
 app.get('*', (req, res) => {
@@ -58,12 +79,9 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Inicializar banco de dados
-const db = require('./database/init');
-
 // Função para obter IP local
 function getLocalIP() {
-  const { networkInterfaces } = require('os');
+  import {  networkInterfaces  } from 'os.js';
   const nets = networkInterfaces();
   const results = [];
 
@@ -77,16 +95,54 @@ function getLocalIP() {
   return results[0] || 'localhost';
 }
 
-// Iniciar servidor
-app.listen(PORT, '0.0.0.0', () => {
-  const localIP = getLocalIP();
-  console.log(`
+// Inicializar servidor
+const startServer = async () => {
+  try {
+    console.log('🔄 Iniciando sistema...');
+    
+    // Verificar variáveis de ambiente
+    if (!process.env.DATABASE_URL && !process.env.NETLIFY_DATABASE_URL && !process.env.NETLIFY_DATABASE_URL_UNPOOLED) {
+      console.error('❌ Variável DATABASE_URL não encontrada!');
+      console.log('💡 Configure uma das seguintes variáveis:');
+      console.log('   - DATABASE_URL');
+      console.log('   - NETLIFY_DATABASE_URL');
+      console.log('   - NETLIFY_DATABASE_URL_UNPOOLED');
+      process.exit(1);
+    }
+
+    // Testar conexão com banco
+    console.log('🔄 Testando conexão com PostgreSQL...');
+    const dbConnected = await testConnection();
+    
+    if (!dbConnected) {
+      console.error('❌ Não foi possível conectar ao banco de dados');
+      console.log('💡 Verifique se a URL do banco está correta');
+      process.exit(1);
+    }
+
+    // Inicializar banco de dados
+    console.log('🔄 Inicializando tabelas do banco...');
+    await initializeTables();
+
+    // Iniciar servidor
+    app.listen(PORT, '0.0.0.0', () => {
+      const localIP = getLocalIP();
+      console.log(`
 🚀 Servidor iniciado com sucesso!
 📍 Local: http://localhost:${PORT}
 🌐 Rede: http://${localIP}:${PORT}
+💾 Banco: PostgreSQL (Neon)
 📱 Para acessar de outros dispositivos, use: http://${localIP}:${PORT}
-  `);
-});
+✅ Sistema pronto para uso!
+      `);
+    });
+  } catch (error) {
+    console.error('❌ Erro ao iniciar servidor:', error);
+    process.exit(1);
+  }
+};
 
-module.exports = app;
+startServer();
+
+export default app;
 
