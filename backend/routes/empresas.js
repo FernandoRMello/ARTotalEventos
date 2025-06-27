@@ -1,5 +1,5 @@
-const express = require('express');
-const router = express.Router();
+import express from 'express';
+import empresasRoutes from './routes/empresas.js';
 const db = require('../database/init');
 
 // Listar todas as empresas
