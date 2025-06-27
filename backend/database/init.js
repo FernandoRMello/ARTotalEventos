@@ -1,5 +1,12 @@
-import { neon } from '@netlify/neon';
-const sql = neon(); // automatically uses env NETLIFY_DATABASE_URL
+import { neon } from '@neondatabase/serverless';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const sql = neon(process.env.DATABASE_URL);
+
+export default sql;
+
 const [post] = await sql`SELECT * FROM posts WHERE id = ${postId}`;
 
 const Database = require('better-sqlite3');
