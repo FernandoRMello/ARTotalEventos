@@ -1,4 +1,4 @@
-import { neon } from '@netlify/neon';Add commentMore actions
+import { neon } from '@netlify/neon';
 const sql = neon(); // automatically uses env NETLIFY_DATABASE_URL
 dotenv.config();
 
