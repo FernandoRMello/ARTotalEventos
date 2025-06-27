@@ -1,6 +1,5 @@
-import { neon } from '@neondatabase/serverless';
-import dotenv from 'dotenv';
-
+import { neon } from '@netlify/neon';Add commentMore actions
+const sql = neon(); // automatically uses env NETLIFY_DATABASE_URL
 dotenv.config();
 
 const sql = neon(process.env.DATABASE_URL);
