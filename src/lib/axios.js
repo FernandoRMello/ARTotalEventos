@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Criar instância do axios
 const api = axios.create({
-  baseURL: 'https://artotaleventos.onrender.com'
+  baseURL: 'https://archeckin.onrender.com/api',
   timeout: 30000, // 30 segundos
   headers: {
     'Content-Type': 'application/json',
@@ -46,4 +46,3 @@ api.interceptors.response.use(
 );
 
 export default api;
-
