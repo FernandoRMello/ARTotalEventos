@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Camera, Upload, User, FileText, CheckCircle, AlertCircle, X, RotateCw, WifiOff, Wifi } from 'lucide-react';
+import { Camera, Upload, User, Building, Hash, FileText, CheckCircle, AlertCircle } from 'lucide-react';
 import axios from '../lib/axios';
 
 export default function Cadastro() {
@@ -13,8 +13,7 @@ export default function Cadastro() {
     nome: '',
     documento: '',
     setor: '',
-    empresa_id: '',
-    tipo_documento: ''
+    empresa_id: ''
   });
   const [empresas, setEmpresas] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -22,96 +21,18 @@ export default function Cadastro() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [imagemDocumento, setImagemDocumento] = useState(null);
-  const [showCameraModal, setShowCameraModal] = useState(false);
-  const [showPreviewModal, setShowPreviewModal] = useState(false);
-  const [cameraStream, setCameraStream] = useState(null);
-  const [uploadMethod, setUploadMethod] = useState(null);
-  const [ocrError, setOcrError] = useState('');
-  const [capturedImage, setCapturedImage] = useState(null);
-  const [ocrResults, setOcrResults] = useState(null);
-  const [networkStatus, setNetworkStatus] = useState({
-    online: navigator.onLine,
-    lastChecked: new Date()
-  });
   const fileInputRef = useRef(null);
-  const videoRef = useRef(null);
-  const formDataOCR = new FormData();
-formDataOCR.append('documento', file);
-
-  // Monitorar status da rede
-  useEffect(() => {
-    const handleOnline = () => {
-      setNetworkStatus({
-        online: true,
-        lastChecked: new Date()
-      });
-    };
-
-    const handleOffline = () => {
-      setNetworkStatus({
-        online: false,
-        lastChecked: new Date()
-      });
-      setError('Sua conexão com a internet foi perdida. Verifique sua rede.');
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    // Verificar conexão periodicamente
-    const connectionChecker = setInterval(() => {
-      setNetworkStatus(prev => ({
-        ...prev,
-        lastChecked: new Date()
-      }));
-    }, 30000);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-      clearInterval(connectionChecker);
-    };
-  }, []);
 
   useEffect(() => {
     carregarEmpresas();
-    return () => {
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-      }
-    };
   }, []);
 
-  useEffect(() => {
-    if (showCameraModal && uploadMethod === 'camera') {
-      iniciarCamera();
-    }
-  }, [showCameraModal, uploadMethod]);
-
-  const carregarEmpresas = async (retryCount = 0) => {
-    if (!networkStatus.online) {
-      setError('Sem conexão com a internet. Verifique sua rede e tente novamente.');
-      return;
-    }
-
+  const carregarEmpresas = async () => {
     try {
-      const response = await axios.get('/empresas', {
-        timeout: 10000 // 10 segundos de timeout
-      });
+      const response = await axios.get('/api/empresas');
       setEmpresas(response.data);
     } catch (err) {
       console.error('Erro ao carregar empresas:', err);
-      
-      if (err.code === 'ECONNABORTED' || err.message === 'Network Error') {
-        setError('A requisição demorou muito ou houve falha na conexão.');
-        
-        // Tentar novamente até 3 vezes
-        if (retryCount < 3) {
-          setTimeout(() => carregarEmpresas(retryCount + 1), 2000);
-        }
-      } else {
-        setError('Erro ao carregar empresas. Tente novamente mais tarde.');
-      }
     }
   };
 
@@ -126,260 +47,61 @@ formDataOCR.append('documento', file);
   const handleImageSelect = (event) => {
     const file = event.target.files[0];
     if (file) {
-      previewImage(file);
+      setImagemDocumento(file);
+      processarOCR(file);
     }
-  };
-
-  const iniciarCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } 
-      });
-      setCameraStream(stream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-    } catch (err) {
-      setError('Não foi possível acessar a câmera. Verifique as permissões.');
-      setShowCameraModal(false);
-    }
-  };
-
-  const capturarImagem = () => {
-    if (videoRef.current) {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      
-      canvas.toBlob(blob => {
-        const file = new File([blob], 'documento-captura.png', { type: 'image/png' });
-        previewImage(file);
-        setShowCameraModal(false);
-      }, 'image/png');
-    }
-  };
-
-  const previewImage = (file) => {
-    setCapturedImage(URL.createObjectURL(file));
-    setImagemDocumento(file);
-    setShowPreviewModal(true);
-  };
-
-  const processarImagemConfirmada = () => {
-    if (imagemDocumento) {
-      processarOCR(imagemDocumento);
-    }
-    setShowPreviewModal(false);
-  };
-
-  const pararCamera = () => {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop());
-      setCameraStream(null);
-    }
-  };
-
-  const abrirOpcoesUpload = (method) => {
-    setUploadMethod(method);
-    
-    if (method === 'gallery') {
-      fileInputRef.current.click();
-    } else if (method === 'camera') {
-      setShowCameraModal(true);
-    }
-  };
-
-  const reprocessarOCR = () => {
-    if (imagemDocumento) {
-      processarOCR(imagemDocumento);
-    }
-  };
-
-  // Função para validar e formatar CPF com algoritmo de validação
-  const validarCPF = (cpf) => {
-    // Remove caracteres não numéricos
-    cpf = cpf.replace(/\D/g, '');
-    
-    // Verifica se tem 11 dígitos
-    if (cpf.length !== 11) return null;
-    
-    // Verifica se todos os dígitos são iguais (inválido)
-    if (/^(\d)\1{10}$/.test(cpf)) return null;
-    
-    // Validação do primeiro dígito verificador
-    let soma = 0;
-    for (let i = 0; i < 9; i++) {
-      soma += parseInt(cpf.charAt(i)) * (10 - i);
-    }
-    let resto = (soma * 10) % 11;
-    if (resto === 10 || resto === 11) resto = 0;
-    if (resto !== parseInt(cpf.charAt(9))) return null;
-    
-    // Validação do segundo dígito verificador
-    soma = 0;
-    for (let i = 0; i < 10; i++) {
-      soma += parseInt(cpf.charAt(i)) * (11 - i);
-    }
-    resto = (soma * 10) % 11;
-    if (resto === 10 || resto === 11) resto = 0;
-    if (resto !== parseInt(cpf.charAt(10))) return null;
-    
-    // Formata CPF (XXX.XXX.XXX-XX)
-    return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
-  };
-
-  // Função para validar e formatar RG
-  const validarRG = (rg) => {
-    // Remove caracteres não numéricos
-    rg = rg.replace(/\D/g, '');
-    
-    // Verifica se tem entre 8 e 10 dígitos (padrão brasileiro)
-    if (rg.length < 8 || rg.length > 10) return null;
-    
-    // Formata RG (XX.XXX.XXX-X)
-    return rg.replace(/(\d{2})(\d{3})(\d{3})(\d{1})/, '$1.$2.$3-$4');
-  };
-
-  // Função para validar CNH (11 dígitos)
-  const validarCNH = (cnh) => {
-    // Remove caracteres não numéricos
-    cnh = cnh.replace(/\D/g, '');
-    
-    // Verifica se tem 11 dígitos
-    if (cnh.length !== 11) return null;
-    
-    // Formata CNH (XXX.XXX.XXX-XX)
-    return cnh.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
   };
 
   const processarOCR = async (file) => {
-    if (!networkStatus.online) {
-      setOcrError('Sem conexão com a internet. Conecte-se para processar o documento.');
-      return;
-    }
-
     setOcrLoading(true);
     setError('');
-    setOcrError('');
-    setSuccess('');
-    setOcrResults(null);
 
     const formDataOCR = new FormData();
     formDataOCR.append('documento', file);
 
     try {
-      const response = await axios.post('/upload/ocr', formDataOCR, {
+      const response = await axios.post('/api/upload/ocr', formDataOCR, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 15000 // 15 segundos de timeout
       });
 
-      console.log('Resposta do OCR:', response.data);
-      setOcrResults(response.data);
-
-      const { nome, cpf, rg, cnh } = response.data;
+      const { nome, cpf, rg } = response.data;
       
-      // Validação dos dados extraídos
-      let dadosValidos = false;
-      const novosDados = {};
-
-      if (nome && typeof nome === 'string' && nome.trim().length >= 3) {
-        novosDados.nome = nome.trim();
-        dadosValidos = true;
+      if (nome) {
+        setFormData(prev => ({ ...prev, nome }));
       }
-
-      // Prioridade: CPF > CNH > RG
       if (cpf) {
-        const cpfFormatado = validarCPF(cpf);
-        if (cpfFormatado) {
-          novosDados.documento = cpfFormatado;
-          novosDados.tipo_documento = 'CPF';
-          dadosValidos = true;
-        }
-      } 
-      
-      if (!novosDados.documento && cnh) {
-        const cnhFormatado = validarCNH(cnh);
-        if (cnhFormatado) {
-          novosDados.documento = cnhFormatado;
-          novosDados.tipo_documento = 'CNH';
-          dadosValidos = true;
-        }
-      }
-      
-      if (!novosDados.documento && rg) {
-        const rgFormatado = validarRG(rg);
-        if (rgFormatado) {
-          novosDados.documento = rgFormatado;
-          novosDados.tipo_documento = 'RG';
-          dadosValidos = true;
-        }
+        setFormData(prev => ({ ...prev, documento: cpf }));
+      } else if (rg) {
+        setFormData(prev => ({ ...prev, documento: rg }));
       }
 
-      if (dadosValidos) {
-        setFormData(prev => ({ ...prev, ...novosDados }));
+      if (nome || cpf || rg) {
         setSuccess('Dados extraídos do documento com sucesso! Verifique e complete as informações.');
       } else {
-        setOcrError('Não foi possível identificar campos válidos no documento. Por favor, preencha manualmente.');
-        console.warn('Dados do OCR inválidos:', response.data);
+        setError('Não foi possível extrair dados do documento. Preencha manualmente.');
       }
     } catch (err) {
-      console.error('Erro no OCR:', err);
-      
-      let mensagemErro = 'Erro ao processar documento. Tente novamente ou preencha manualmente.';
-      
-      if (err.response) {
-        // Tratamento específico para diferentes tipos de erros da API
-        if (err.response.status === 400) {
-          mensagemErro = 'Formato de imagem inválido. Use JPG ou PNG.';
-        } else if (err.response.status === 413) {
-          mensagemErro = 'Imagem muito grande. Tamanho máximo: 5MB.';
-        } else if (err.response.data?.error) {
-          mensagemErro = `Erro no servidor: ${err.response.data.error}`;
-        }
-      } else if (err.code === 'ECONNABORTED') {
-        mensagemErro = 'Tempo limite excedido. Verifique sua conexão com a internet.';
-      } else if (err.message === 'Network Error') {
-        mensagemErro = 'Falha na conexão. Verifique sua internet e tente novamente.';
-      }
-      
-      setOcrError(mensagemErro);
+      setError('Erro ao processar imagem do documento. Tente novamente ou preencha manualmente.');
     } finally {
       setOcrLoading(false);
     }
   };
 
   const criarEmpresa = async (nomeEmpresa) => {
-    if (!networkStatus.online) {
-      throw new Error('Sem conexão com a internet. Conecte-se para criar uma empresa.');
-    }
-
     try {
-      const response = await axios.post('/empresas', {
+      const response = await axios.post('/api/empresas', {
         nome: nomeEmpresa
-      }, {
-        timeout: 10000
       });
       return response.data.id;
     } catch (err) {
-      if (err.code === 'ECONNABORTED' || err.message === 'Network Error') {
-        throw new Error('Falha na conexão ao criar empresa. Verifique sua internet.');
-      } else {
-        throw new Error('Erro ao criar empresa');
-      }
+      throw new Error('Erro ao criar empresa');
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!networkStatus.online) {
-      setError('Sem conexão com a internet. Conecte-se para cadastrar.');
-      return;
-    }
     
     if (!formData.nome.trim() || !formData.documento.trim()) {
       setError('Nome e documento são obrigatórios');
@@ -404,14 +126,11 @@ formDataOCR.append('documento', file);
         return;
       }
 
-      const response = await axios.post('/pessoas', {
+      const response = await axios.post('/api/pessoas', {
         nome: formData.nome.trim(),
         documento: formData.documento.trim(),
-        tipo_documento: formData.tipo_documento || null,
         setor: formData.setor.trim() || null,
         empresa_id: empresaId
-      }, {
-        timeout: 10000
       });
 
       setSuccess(`Pessoa cadastrada com sucesso: ${response.data.nome}`);
@@ -421,20 +140,15 @@ formDataOCR.append('documento', file);
         nome: '',
         documento: '',
         setor: '',
-        empresa_id: '',
-        tipo_documento: ''
+        empresa_id: ''
       });
       setImagemDocumento(null);
-      setCapturedImage(null);
-      setOcrResults(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     } catch (err) {
       if (err.response?.status === 409) {
         setError('Documento já cadastrado no sistema');
-      } else if (err.code === 'ECONNABORTED' || err.message === 'Network Error') {
-        setError('Falha na conexão. Verifique sua internet e tente novamente.');
       } else {
         setError(err.response?.data?.error || 'Erro ao cadastrar pessoa');
       }
@@ -447,134 +161,19 @@ formDataOCR.append('documento', file);
     setFormData({
       nome: '',
       documento: '',
-        setor: '',
-      empresa_id: '',
-      tipo_documento: ''
+      setor: '',
+      empresa_id: ''
     });
     setImagemDocumento(null);
-    setCapturedImage(null);
-    setOcrResults(null);
     setError('');
     setSuccess('');
-    setOcrError('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
 
-  const verificarConexao = () => {
-    setNetworkStatus({
-      online: navigator.onLine,
-      lastChecked: new Date()
-    });
-    
-    if (navigator.onLine) {
-      setError('');
-      carregarEmpresas();
-    } else {
-      setError('Ainda sem conexão com a internet. Verifique sua rede.');
-    }
-  };
-
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
-      {/* Modal da Câmera */}
-      {showCameraModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-4 w-full max-w-md">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold">Capturar Documento</h2>
-              <Button 
-                variant="ghost" 
-                size="icon"
-                onClick={() => {
-                  pararCamera();
-                  setShowCameraModal(false);
-                }}
-              >
-                <X className="h-5 w-5" />
-              </Button>
-            </div>
-            
-            <div className="relative bg-black rounded-lg overflow-hidden">
-              <video 
-                ref={videoRef} 
-                autoPlay 
-                playsInline 
-                className="w-full h-auto max-h-[60vh]"
-              />
-              
-              <div className="absolute bottom-4 left-0 right-0 flex justify-center">
-                <Button
-                  onClick={capturarImagem}
-                  className="bg-white text-black rounded-full h-16 w-16 flex items-center justify-center shadow-lg hover:bg-gray-100"
-                >
-                  <Camera className="h-8 w-8" />
-                </Button>
-              </div>
-            </div>
-            
-            <p className="text-center text-sm text-gray-500 mt-2">
-              Posicione o documento dentro do quadro e clique para capturar
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Pré-visualização */}
-      {showPreviewModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-4 w-full max-w-md">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold">Pré-visualização</h2>
-              <Button 
-                variant="ghost" 
-                size="icon"
-                onClick={() => {
-                  setShowPreviewModal(false);
-                  setImagemDocumento(null);
-                  setCapturedImage(null);
-                }}
-              >
-                <X className="h-5 w-5" />
-              </Button>
-            </div>
-            
-            <div className="flex justify-center mb-4">
-              {capturedImage && (
-                <img 
-                  src={capturedImage} 
-                  alt="Documento capturado" 
-                  className="max-h-80 object-contain"
-                />
-              )}
-            </div>
-            
-            <div className="flex gap-2">
-              <Button 
-                variant="outline" 
-                className="flex-1"
-                onClick={() => {
-                  setShowPreviewModal(false);
-                  setImagemDocumento(null);
-                  setCapturedImage(null);
-                  abrirOpcoesUpload(uploadMethod);
-                }}
-              >
-                Refazer
-              </Button>
-              <Button 
-                className="flex-1"
-                onClick={processarImagemConfirmada}
-                disabled={!networkStatus.online}
-              >
-                Usar esta imagem
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="text-center mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2 flex items-center justify-center gap-2">
           <User className="h-8 w-8 text-blue-600" />
@@ -583,33 +182,6 @@ formDataOCR.append('documento', file);
         <p className="text-gray-600">
           Cadastre pessoas individualmente com extração automática de dados via OCR
         </p>
-      </div>
-
-      {/* Status da Conexão */}
-      <div className={`mb-6 p-3 rounded-lg flex items-center justify-between ${
-        networkStatus.online ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-      }`}>
-        <div className="flex items-center gap-2">
-          {networkStatus.online ? (
-            <Wifi className="h-5 w-5" />
-          ) : (
-            <WifiOff className="h-5 w-5" />
-          )}
-          <span>
-            {networkStatus.online 
-              ? 'Conectado à internet' 
-              : 'Sem conexão com a internet'}
-          </span>
-        </div>
-        <Button 
-          variant="ghost" 
-          size="sm"
-          onClick={verificarConexao}
-          className={networkStatus.online ? 'text-green-800' : 'text-red-800'}
-        >
-          <RotateCw className="h-4 w-4 mr-1" />
-          Verificar novamente
-        </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -621,49 +193,20 @@ formDataOCR.append('documento', file);
               OCR de Documento (Opcional)
             </CardTitle>
             <CardDescription>
-              Capture uma foto do documento ou selecione uma imagem para extrair dados automaticamente
+              Faça upload de uma foto do documento para extrair dados automaticamente
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-              {ocrLoading ? (
-                <div className="space-y-2">
-                  <div className="flex justify-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-                  </div>
-                  <p className="text-sm text-blue-600">
-                    Processando documento... Isso pode levar alguns segundos
-                  </p>
-                </div>
-              ) : imagemDocumento ? (
+              {imagemDocumento ? (
                 <div className="space-y-2">
                   <FileText className="mx-auto h-12 w-12 text-green-500" />
                   <p className="text-sm text-green-600">
                     Imagem carregada: {imagemDocumento.name}
                   </p>
-                  {ocrError ? (
-                    <div className="mt-2">
-                      <Alert variant="destructive" className="mb-2">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertDescription>{ocrError}</AlertDescription>
-                      </Alert>
-                      <Button 
-                        variant="outline" 
-                        onClick={reprocessarOCR}
-                        className="mt-2"
-                        disabled={!networkStatus.online}
-                      >
-                        <RotateCw className="mr-2 h-4 w-4" />
-                        Tentar novamente
-                      </Button>
-                    </div>
-                  ) : success ? (
-                    <p className="text-sm text-green-600 mt-2">
-                      {success}
-                    </p>
-                  ) : (
-                    <p className="text-sm text-yellow-600 mt-2">
-                      Imagem pronta para processamento
+                  {ocrLoading && (
+                    <p className="text-sm text-blue-600">
+                      Processando OCR...
                     </p>
                   )}
                 </div>
@@ -671,7 +214,7 @@ formDataOCR.append('documento', file);
                 <div className="space-y-2">
                   <Upload className="mx-auto h-12 w-12 text-gray-400" />
                   <p className="text-sm text-gray-600">
-                    Selecione como deseja carregar a imagem do documento
+                    Clique para selecionar uma imagem do documento
                   </p>
                 </div>
               )}
@@ -684,53 +227,26 @@ formDataOCR.append('documento', file);
                 className="hidden"
                 id="image-upload"
               />
-              
-              <div className="flex flex-col sm:flex-row gap-2 justify-center mt-4">
+              <label htmlFor="image-upload">
                 <Button 
                   variant="outline" 
-                  className="flex items-center gap-2"
-                  disabled={ocrLoading || !networkStatus.online}
-                  onClick={() => abrirOpcoesUpload('camera')}
+                  className="mt-2 cursor-pointer"
+                  disabled={ocrLoading}
                 >
-                  <Camera className="h-4 w-4" />
-                  Usar Câmera
+                  {ocrLoading ? 'Processando...' : 'Selecionar Imagem'}
                 </Button>
-                
-                <Button 
-                  variant="outline" 
-                  className="flex items-center gap-2"
-                  disabled={ocrLoading || !networkStatus.online}
-                  onClick={() => abrirOpcoesUpload('gallery')}
-                >
-                  <Upload className="h-4 w-4" />
-                  Galeria
-                </Button>
-              </div>
+              </label>
             </div>
 
             <div className="text-sm text-gray-500">
-              <p className="font-medium mb-1">Para melhores resultados com documentos brasileiros:</p>
-              <ul className="list-disc list-inside space-y-1">
-                <li>Documentos oficiais (RG, CNH, CPF)</li>
-                <li>Fotos bem iluminadas e sem reflexos</li>
-                <li>Documento centralizado e preenchendo a imagem</li>
-                <li>Evite documentos dobrados ou com sombras</li>
-                <li>Posicione a câmera paralela ao documento</li>
+              <p><strong>Dica:</strong> Para melhores resultados:</p>
+              <ul className="list-disc list-inside mt-1 space-y-1">
+                <li>Use boa iluminação</li>
+                <li>Mantenha o documento reto</li>
+                <li>Evite reflexos e sombras</li>
+                <li>Certifique-se de que o texto está legível</li>
               </ul>
             </div>
-
-            {/* Resultados do OCR */}
-            {ocrResults && (
-              <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-                <h3 className="font-medium mb-2">Dados Extraídos:</h3>
-                <div className="space-y-1 text-sm">
-                  <p><span className="font-medium">Nome:</span> {ocrResults.nome || 'Não identificado'}</p>
-                  <p><span className="font-medium">CPF:</span> {ocrResults.cpf || 'Não identificado'}</p>
-                  <p><span className="font-medium">RG:</span> {ocrResults.rg || 'Não identificado'}</p>
-                  <p><span className="font-medium">CNH:</span> {ocrResults.cnh || 'Não identificado'}</p>
-                </div>
-              </div>
-            )}
           </CardContent>
         </Card>
 
@@ -752,25 +268,18 @@ formDataOCR.append('documento', file);
                   value={formData.nome}
                   onChange={(e) => handleInputChange('nome', e.target.value)}
                   required
-                  disabled={!networkStatus.online}
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="documento">Documento (CPF/RG/CNH) *</Label>
+                <Label htmlFor="documento">Documento (CPF/RG) *</Label>
                 <Input
                   id="documento"
-                  placeholder="Digite o CPF, RG ou CNH"
+                  placeholder="Digite o CPF ou RG"
                   value={formData.documento}
                   onChange={(e) => handleInputChange('documento', e.target.value)}
                   required
-                  disabled={!networkStatus.online}
                 />
-                {formData.tipo_documento && (
-                  <p className="text-xs text-gray-500">
-                    Documento reconhecido como: <span className="font-medium">{formData.tipo_documento}</span>
-                  </p>
-                )}
               </div>
 
               <div className="space-y-2">
@@ -780,7 +289,6 @@ formDataOCR.append('documento', file);
                   placeholder="Digite o setor (opcional)"
                   value={formData.setor}
                   onChange={(e) => handleInputChange('setor', e.target.value)}
-                  disabled={!networkStatus.online}
                 />
               </div>
 
@@ -789,14 +297,9 @@ formDataOCR.append('documento', file);
                 <Select 
                   value={formData.empresa_id} 
                   onValueChange={(value) => handleInputChange('empresa_id', value)}
-                  disabled={!networkStatus.online || empresas.length === 0}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder={
-                      empresas.length === 0 && !networkStatus.online 
-                        ? "Carregando empresas..." 
-                        : "Selecione uma empresa"
-                    } />
+                    <SelectValue placeholder="Selecione uma empresa" />
                   </SelectTrigger>
                   <SelectContent>
                     {empresas.map((empresa) => (
@@ -806,11 +309,6 @@ formDataOCR.append('documento', file);
                     ))}
                   </SelectContent>
                 </Select>
-                {empresas.length === 0 && !networkStatus.online && (
-                  <p className="text-xs text-red-500 mt-1">
-                    Não foi possível carregar empresas. Verifique sua conexão.
-                  </p>
-                )}
               </div>
 
               <div className="space-y-2">
@@ -820,14 +318,13 @@ formDataOCR.append('documento', file);
                   placeholder="Digite o nome da nova empresa"
                   value={formData.nova_empresa || ''}
                   onChange={(e) => handleInputChange('nova_empresa', e.target.value)}
-                  disabled={!networkStatus.online}
                 />
               </div>
 
               <div className="flex gap-2 pt-4">
                 <Button 
                   type="submit" 
-                  disabled={loading || !networkStatus.online}
+                  disabled={loading}
                   className="flex-1"
                 >
                   {loading ? 'Cadastrando...' : 'Cadastrar Pessoa'}
@@ -867,10 +364,8 @@ formDataOCR.append('documento', file);
         <p>
           * Campos obrigatórios. Após o cadastro, a pessoa estará disponível para check-in.
         </p>
-        <p className="mt-1">
-          Última verificação de conexão: {networkStatus.lastChecked.toLocaleTimeString()}
-        </p>
       </div>
     </div>
   );
 }
+

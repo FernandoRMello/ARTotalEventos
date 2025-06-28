@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
+// https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -11,7 +12,7 @@ export default defineConfig({
     },
   },
   build: {
-    minify: 'esbuild',
+    minify: 'esbuild', // Usar esbuild ao invés de terser
     rollupOptions: {
       output: {
         entryFileNames: 'assets/[name]-[hash].js',

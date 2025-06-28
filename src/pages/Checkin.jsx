@@ -26,7 +26,7 @@ export default function Checkin() {
     setPessoa(null);
 
     try {
-      const response = await axios.get(`/pessoas/documento/${documento.trim()}`);
+      const response = await axios.get(`/api/pessoas/documento/${documento.trim()}`);
       setPessoa(response.data);
       
       if (response.data.checkin_realizado) {
@@ -54,7 +54,7 @@ export default function Checkin() {
     setSuccess('');
 
     try {
-      const response = await axios.post('/checkins', {
+      const response = await axios.post('/api/checkins', {
         documento: documento.trim(),
         pulseira: pulseira.trim()
       });
