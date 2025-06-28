@@ -13,7 +13,8 @@ export default function Cadastro() {
     nome: '',
     documento: '',
     setor: '',
-    empresa_id: ''
+    empresa_id: '',
+    tipo_documento: ''
   });
   const [empresas, setEmpresas] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -27,6 +28,7 @@ export default function Cadastro() {
   const [uploadMethod, setUploadMethod] = useState(null);
   const [ocrError, setOcrError] = useState('');
   const [capturedImage, setCapturedImage] = useState(null);
+  const [ocrResults, setOcrResults] = useState(null);
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
 
@@ -136,13 +138,34 @@ export default function Cadastro() {
     }
   };
 
-  // Função para validar e formatar CPF
+  // Função para validar e formatar CPF com algoritmo de validação
   const validarCPF = (cpf) => {
     // Remove caracteres não numéricos
     cpf = cpf.replace(/\D/g, '');
     
     // Verifica se tem 11 dígitos
     if (cpf.length !== 11) return null;
+    
+    // Verifica se todos os dígitos são iguais (inválido)
+    if (/^(\d)\1{10}$/.test(cpf)) return null;
+    
+    // Validação do primeiro dígito verificador
+    let soma = 0;
+    for (let i = 0; i < 9; i++) {
+      soma += parseInt(cpf.charAt(i)) * (10 - i);
+    }
+    let resto = (soma * 10) % 11;
+    if (resto === 10 || resto === 11) resto = 0;
+    if (resto !== parseInt(cpf.charAt(9))) return null;
+    
+    // Validação do segundo dígito verificador
+    soma = 0;
+    for (let i = 0; i < 10; i++) {
+      soma += parseInt(cpf.charAt(i)) * (11 - i);
+    }
+    resto = (soma * 10) % 11;
+    if (resto === 10 || resto === 11) resto = 0;
+    if (resto !== parseInt(cpf.charAt(10))) return null;
     
     // Formata CPF (XXX.XXX.XXX-XX)
     return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
@@ -153,11 +176,23 @@ export default function Cadastro() {
     // Remove caracteres não numéricos
     rg = rg.replace(/\D/g, '');
     
-    // Verifica se tem entre 8 e 10 dígitos
+    // Verifica se tem entre 8 e 10 dígitos (padrão brasileiro)
     if (rg.length < 8 || rg.length > 10) return null;
     
     // Formata RG (XX.XXX.XXX-X)
     return rg.replace(/(\d{2})(\d{3})(\d{3})(\d{1})/, '$1.$2.$3-$4');
+  };
+
+  // Função para validar CNH (11 dígitos)
+  const validarCNH = (cnh) => {
+    // Remove caracteres não numéricos
+    cnh = cnh.replace(/\D/g, '');
+    
+    // Verifica se tem 11 dígitos
+    if (cnh.length !== 11) return null;
+    
+    // Formata CNH (XXX.XXX.XXX-XX)
+    return cnh.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
   };
 
   const processarOCR = async (file) => {
@@ -165,6 +200,7 @@ export default function Cadastro() {
     setError('');
     setOcrError('');
     setSuccess('');
+    setOcrResults(null);
 
     const formDataOCR = new FormData();
     formDataOCR.append('documento', file);
@@ -177,8 +213,9 @@ export default function Cadastro() {
       });
 
       console.log('Resposta do OCR:', response.data);
+      setOcrResults(response.data);
 
-      const { nome, cpf, rg } = response.data;
+      const { nome, cpf, rg, cnh } = response.data;
       
       // Validação dos dados extraídos
       let dadosValidos = false;
@@ -189,16 +226,30 @@ export default function Cadastro() {
         dadosValidos = true;
       }
 
+      // Prioridade: CPF > CNH > RG
       if (cpf) {
         const cpfFormatado = validarCPF(cpf);
         if (cpfFormatado) {
           novosDados.documento = cpfFormatado;
+          novosDados.tipo_documento = 'CPF';
           dadosValidos = true;
         }
-      } else if (rg) {
+      } 
+      
+      if (!novosDados.documento && cnh) {
+        const cnhFormatado = validarCNH(cnh);
+        if (cnhFormatado) {
+          novosDados.documento = cnhFormatado;
+          novosDados.tipo_documento = 'CNH';
+          dadosValidos = true;
+        }
+      }
+      
+      if (!novosDados.documento && rg) {
         const rgFormatado = validarRG(rg);
         if (rgFormatado) {
           novosDados.documento = rgFormatado;
+          novosDados.tipo_documento = 'RG';
           dadosValidos = true;
         }
       }
@@ -208,7 +259,7 @@ export default function Cadastro() {
         setSuccess('Dados extraídos do documento com sucesso! Verifique e complete as informações.');
       } else {
         setOcrError('Não foi possível identificar campos válidos no documento. Por favor, preencha manualmente.');
-        console.warn('Dados do OCR inválidos:', { nome, cpf, rg });
+        console.warn('Dados do OCR inválidos:', response.data);
       }
     } catch (err) {
       console.error('Erro no OCR:', err);
@@ -274,6 +325,7 @@ export default function Cadastro() {
       const response = await axios.post('/api/pessoas', {
         nome: formData.nome.trim(),
         documento: formData.documento.trim(),
+        tipo_documento: formData.tipo_documento || null,
         setor: formData.setor.trim() || null,
         empresa_id: empresaId
       });
@@ -285,10 +337,12 @@ export default function Cadastro() {
         nome: '',
         documento: '',
         setor: '',
-        empresa_id: ''
+        empresa_id: '',
+        tipo_documento: ''
       });
       setImagemDocumento(null);
       setCapturedImage(null);
+      setOcrResults(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -308,10 +362,12 @@ export default function Cadastro() {
       nome: '',
       documento: '',
       setor: '',
-      empresa_id: ''
+      empresa_id: '',
+      tipo_documento: ''
     });
     setImagemDocumento(null);
     setCapturedImage(null);
+    setOcrResults(null);
     setError('');
     setSuccess('');
     setOcrError('');
@@ -524,14 +580,28 @@ export default function Cadastro() {
             </div>
 
             <div className="text-sm text-gray-500">
-              <p className="font-medium mb-1">Para melhores resultados:</p>
+              <p className="font-medium mb-1">Para melhores resultados com documentos brasileiros:</p>
               <ul className="list-disc list-inside space-y-1">
                 <li>Documentos oficiais (RG, CNH, CPF)</li>
                 <li>Fotos bem iluminadas e sem reflexos</li>
                 <li>Documento centralizado e preenchendo a imagem</li>
                 <li>Evite documentos dobrados ou com sombras</li>
+                <li>Posicione a câmera paralela ao documento</li>
               </ul>
             </div>
+
+            {/* Resultados do OCR */}
+            {ocrResults && (
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                <h3 className="font-medium mb-2">Dados Extraídos:</h3>
+                <div className="space-y-1 text-sm">
+                  <p><span className="font-medium">Nome:</span> {ocrResults.nome || 'Não identificado'}</p>
+                  <p><span className="font-medium">CPF:</span> {ocrResults.cpf || 'Não identificado'}</p>
+                  <p><span className="font-medium">RG:</span> {ocrResults.rg || 'Não identificado'}</p>
+                  <p><span className="font-medium">CNH:</span> {ocrResults.cnh || 'Não identificado'}</p>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -557,14 +627,19 @@ export default function Cadastro() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="documento">Documento (CPF/RG) *</Label>
+                <Label htmlFor="documento">Documento (CPF/RG/CNH) *</Label>
                 <Input
                   id="documento"
-                  placeholder="Digite o CPF ou RG"
+                  placeholder="Digite o CPF, RG ou CNH"
                   value={formData.documento}
                   onChange={(e) => handleInputChange('documento', e.target.value)}
                   required
                 />
+                {formData.tipo_documento && (
+                  <p className="text-xs text-gray-500">
+                    Documento reconhecido como: <span className="font-medium">{formData.tipo_documento}</span>
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">
