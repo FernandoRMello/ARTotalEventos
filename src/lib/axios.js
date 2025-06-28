@@ -1,5 +1,10 @@
-// src/lib/axios.js
 import axios from 'axios';
+
+useEffect(() => {
+  axios.get(import.meta.env.VITE_API_URL + '/pessoas')
+    .then(res => setPessoas(res.data))
+    .catch(console.error);
+}, []);
 
 // URL base do backend hospedado no Render
 const baseURL = 'https://artotaleventos.onrender.com';
