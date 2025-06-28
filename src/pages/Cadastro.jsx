@@ -2,8 +2,6 @@ import express from 'express';
 const router = express.Router();
 import XLSX from 'xlsx';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
 import { createWorker } from 'tesseract.js';
 import { query } from '../database/postgres';
 
