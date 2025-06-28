@@ -1,5 +1,3 @@
-import express from 'express';
-const router = express.Router();
 import XLSX from 'xlsx';
 import multer from 'multer';
 import { createWorker } from 'tesseract.js';
