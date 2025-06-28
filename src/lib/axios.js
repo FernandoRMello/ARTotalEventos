@@ -2,11 +2,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'https://artotaleventos.onrender.com/api',
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  baseURL: import.meta.env.VITE_API_URL || 'https://archeckin.onrender.com/api',
 });
 
 // Interceptor para responses (mantido para tratamento de erros)
