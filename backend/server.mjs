@@ -23,6 +23,19 @@ app.use('/api/pessoas', pessoasRoutes);
 app.use('/api/checkins', checkinsRoutes);
 app.use('/api/upload', uploadRoutes);
 
+async function getLocalIPAddress() {
+  const { networkInterfaces } = await import('os');
+  const nets = networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        return net.address;
+      }
+    }
+  }
+  return 'localhost';
+}
+
 async function startServer() {
   console.log('🔄 Iniciando sistema...');
 
@@ -36,27 +49,16 @@ async function startServer() {
   console.log('🔄 Inicializando tabelas do banco...');
   await initializeTables();
 
+  const ip = await getLocalIPAddress();
+
   app.listen(PORT, () => {
     console.log('🚀 Servidor iniciado com sucesso!');
     console.log(`📍 Local: http://localhost:${PORT}`);
-    console.log(`🌐 Rede: http://${getLocalIPAddress()}:${PORT}`);
+    console.log(`🌐 Rede: http://${ip}:${PORT}`);
     console.log('💾 Banco: PostgreSQL (Neon)');
-    console.log(`📱 Acesso em rede: http://${getLocalIPAddress()}:${PORT}`);
+    console.log(`📱 Acesso em rede: http://${ip}:${PORT}`);
     console.log('✅ Sistema pronto para uso!');
   });
-}
-
-function getLocalIPAddress() {
-  const { networkInterfaces } = await import('os');
-  const nets = networkInterfaces();
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name]) {
-      if (net.family === 'IPv4' && !net.internal) {
-        return net.address;
-      }
-    }
-  }
-  return 'localhost';
 }
 
 startServer().catch(err => {
