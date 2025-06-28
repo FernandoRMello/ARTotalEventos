@@ -1,5 +1,6 @@
-import {  Pool  } from 'pg';
-require('dotenv').config();
+import { Pool } from 'pg';
+import dotenv from 'dotenv';
+dotenv.config();
 
 // Configuração do pool de conexões PostgreSQL
 const pool = new Pool({
@@ -32,10 +33,10 @@ async function getClient() {
 // Função para inicializar as tabelas
 async function initializeTables() {
   const client = await getClient();
-  
+
   try {
     await client.query('BEGIN');
-    
+
     // Criar tabela de empresas
     await client.query(`
       CREATE TABLE IF NOT EXISTS empresas (
@@ -43,9 +44,9 @@ async function initializeTables() {
         nome VARCHAR(255) NOT NULL UNIQUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+      );
     `);
-    
+
     // Criar tabela de pessoas
     await client.query(`
       CREATE TABLE IF NOT EXISTS pessoas (
@@ -56,9 +57,9 @@ async function initializeTables() {
         setor VARCHAR(255),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+      );
     `);
-    
+
     // Criar tabela de checkins
     await client.query(`
       CREATE TABLE IF NOT EXISTS checkins (
@@ -67,29 +68,17 @@ async function initializeTables() {
         pulseira VARCHAR(50) NOT NULL UNIQUE,
         checkin_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         checkin_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+      );
     `);
-    
-    // Criar índices para melhor performance
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_pessoas_documento ON pessoas(documento);
-    `);
-    
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_pessoas_empresa ON pessoas(empresa_id);
-    `);
-    
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_checkins_pessoa ON checkins(pessoa_id);
-    `);
-    
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_checkins_pulseira ON checkins(pulseira);
-    `);
-    
+
+    // Índices
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_pessoas_documento ON pessoas(documento);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_pessoas_empresa ON pessoas(empresa_id);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_checkins_pessoa ON checkins(pessoa_id);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_checkins_pulseira ON checkins(pulseira);`);
+
     await client.query('COMMIT');
     console.log('✅ Tabelas PostgreSQL inicializadas com sucesso!');
-    
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('❌ Erro ao inicializar tabelas:', error);
@@ -99,7 +88,7 @@ async function initializeTables() {
   }
 }
 
-// Função para testar a conexão
+// Testar conexão com banco
 async function testConnection() {
   try {
     const result = await query('SELECT NOW() as current_time');
@@ -111,18 +100,14 @@ async function testConnection() {
   }
 }
 
-// Função para fechar o pool de conexões
+// Encerrar pool
 async function closePool() {
   await pool.end();
   console.log('Pool de conexões PostgreSQL fechado');
 }
 
-export default {
+export {
   query,
   getClient,
   pool,
-  initializeTables,
-  testConnection,
-  closePool
-};
-
+  initializeT
