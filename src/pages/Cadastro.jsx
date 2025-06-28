@@ -1,12 +1,17 @@
-import express from 'express';
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
-import { read, utils } from 'xlsx';
-import { createWorker } from 'tesseract.js';
-import { query } from '../database/postgres';
+import { useState, useRef, useEffect } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Camera, Upload, User, FileText, CheckCircle, AlertCircle, X, RotateCw } from 'lucide-react';
+import axios from '../lib/axios';
 
-const router = express.Router();
+export default function Cadastro() {
+  // ... (todo o código do componente permanece igual)
+  // REMOVA TODAS AS IMPORTAÇÕES DE MÓDULOS DO NODE.JS (express, fs, path, etc.)
+}
 
 // Configuração do multer para upload de arquivos
 const storage = multer.diskStorage({
