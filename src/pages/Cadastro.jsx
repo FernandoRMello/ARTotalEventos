@@ -1,8 +1,12 @@
-import React, { useState } from 'react';
-import * as XLSX from 'xlsx'; // ✅ Correta para Vite/Netlify
-import api from '../lib/axios';
+import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { read, utils } from 'xlsx';
 import { createWorker } from 'tesseract.js';
 import { query } from '../database/postgres';
+
+const router = express.Router();
 
 // Configuração do multer para upload de arquivos
 const storage = multer.diskStorage({
@@ -26,7 +30,6 @@ const upload = multer({
   },
   fileFilter: (req, file, cb) => {
     if (file.fieldname === 'excel') {
-      // Aceitar arquivos Excel
       const allowedMimes = [
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'application/vnd.ms-excel',
@@ -41,7 +44,6 @@ const upload = multer({
         cb(new Error('Apenas arquivos Excel (.xlsx, .xls) são permitidos'));
       }
     } else if (file.fieldname === 'documento') {
-      // Aceitar imagens para OCR
       const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
       if (allowedMimes.includes(file.mimetype)) {
         cb(null, true);
@@ -61,18 +63,18 @@ router.post('/excel/validar', upload.single('excel'), async (req, res) => {
       return res.status(400).json({ error: 'Nenhum arquivo foi enviado' });
     }
 
-    const workbook = XLSX.readFile(req.file.path);
+    const data = new Uint8Array(fs.readFileSync(req.file.path));
+    const workbook = read(data, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(worksheet);
+    const jsonData = utils.sheet_to_json(worksheet);
 
-    // Validar estrutura
-    if (data.length === 0) {
+    if (jsonData.length === 0) {
       return res.status(400).json({ error: 'Planilha está vazia' });
     }
 
     const requiredFields = ['nome', 'documento', 'empresa'];
-    const firstRow = data[0];
+    const firstRow = jsonData[0];
     const missingFields = requiredFields.filter(field => !(field in firstRow));
 
     if (missingFields.length > 0) {
@@ -83,13 +85,12 @@ router.post('/excel/validar', upload.single('excel'), async (req, res) => {
       });
     }
 
-    // Validar dados
     const errors = [];
     const empresas = new Set();
     const documentos = new Set();
 
-    data.forEach((row, index) => {
-      const rowNum = index + 2; // +2 porque começa do 1 e pula o cabeçalho
+    jsonData.forEach((row, index) => {
+      const rowNum = index + 2;
 
       if (!row.nome || row.nome.trim() === '') {
         errors.push(`Linha ${rowNum}: Nome é obrigatório`);
@@ -112,7 +113,6 @@ router.post('/excel/validar', upload.single('excel'), async (req, res) => {
       }
     });
 
-    // Verificar documentos já existentes no banco
     if (documentos.size > 0) {
       const docsArray = Array.from(documentos);
       const placeholders = docsArray.map((_, i) => `$${i + 1}`).join(',');
@@ -126,26 +126,24 @@ router.post('/excel/validar', upload.single('excel'), async (req, res) => {
       });
     }
 
-    // Limpar arquivo temporário
     fs.unlinkSync(req.file.path);
 
     if (errors.length > 0) {
       return res.status(400).json({ 
         error: 'Erros encontrados na validação',
-        errors: errors.slice(0, 10), // Limitar a 10 erros
+        errors: errors.slice(0, 10),
         total_errors: errors.length
       });
     }
 
     res.json({
       message: 'Arquivo válido',
-      total_registros: data.length,
+      total_registros: jsonData.length,
       empresas_encontradas: Array.from(empresas),
-      preview: data.slice(0, 5) // Mostrar apenas os primeiros 5 registros
+      preview: jsonData.slice(0, 5)
     });
 
   } catch (error) {
-    // Limpar arquivo em caso de erro
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -162,29 +160,27 @@ router.post('/excel', upload.single('excel'), async (req, res) => {
       return res.status(400).json({ error: 'Nenhum arquivo foi enviado' });
     }
 
-    const workbook = XLSX.readFile(req.file.path);
+    const data = new Uint8Array(fs.readFileSync(req.file.path));
+    const workbook = read(data, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(worksheet);
+    const jsonData = utils.sheet_to_json(worksheet);
 
     let empresasCriadas = 0;
     let pessoasCriadas = 0;
     const errors = [];
 
-    // Processar cada linha
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
+    for (let i = 0; i < jsonData.length; i++) {
+      const row = jsonData[i];
       const rowNum = i + 2;
 
       try {
-        // Verificar/criar empresa
         let empresaResult = await query(`
           SELECT id FROM empresas WHERE nome = $1
         `, [row.empresa.trim()]);
 
         let empresaId;
         if (empresaResult.rows.length === 0) {
-          // Criar nova empresa
           const novaEmpresaResult = await query(`
             INSERT INTO empresas (nome) VALUES ($1) RETURNING id
           `, [row.empresa.trim()]);
@@ -194,7 +190,6 @@ router.post('/excel', upload.single('excel'), async (req, res) => {
           empresaId = empresaResult.rows[0].id;
         }
 
-        // Criar pessoa
         await query(`
           INSERT INTO pessoas (nome, documento, setor, empresa_id) 
           VALUES ($1, $2, $3, $4)
@@ -208,7 +203,7 @@ router.post('/excel', upload.single('excel'), async (req, res) => {
 
       } catch (error) {
         console.error(`Erro na linha ${rowNum}:`, error);
-        if (error.code === '23505') { // Unique violation
+        if (error.code === '23505') {
           errors.push(`Linha ${rowNum}: Documento ${row.documento} já existe`);
         } else {
           errors.push(`Linha ${rowNum}: ${error.message}`);
@@ -216,19 +211,17 @@ router.post('/excel', upload.single('excel'), async (req, res) => {
       }
     }
 
-    // Limpar arquivo temporário
     fs.unlinkSync(req.file.path);
 
     res.json({
       message: 'Importação concluída',
       empresas_criadas: empresasCriadas,
       pessoas_criadas: pessoasCriadas,
-      total_processados: data.length,
+      total_processados: jsonData.length,
       errors: errors
     });
 
   } catch (error) {
-    // Limpar arquivo em caso de erro
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -242,13 +235,9 @@ router.post('/excel', upload.single('excel'), async (req, res) => {
 const validarCPF = (cpf) => {
   cpf = cpf.replace(/\D/g, '');
   
-  // Verifica se tem 11 dígitos
   if (cpf.length !== 11) return null;
-  
-  // Verifica se todos os dígitos são iguais (inválido)
   if (/^(\d)\1{10}$/.test(cpf)) return null;
   
-  // Validação do primeiro dígito verificador
   let soma = 0;
   for (let i = 0; i < 9; i++) {
     soma += parseInt(cpf.charAt(i)) * (10 - i);
@@ -256,8 +245,7 @@ const validarCPF = (cpf) => {
   let resto = (soma * 10) % 11;
   if (resto === 10 || resto === 11) resto = 0;
   if (resto !== parseInt(cpf.charAt(9))) return null;
-  
-  // Validação do segundo dígito verificador
+
   soma = 0;
   for (let i = 0; i < 10; i++) {
     soma += parseInt(cpf.charAt(i)) * (11 - i);
@@ -271,20 +259,13 @@ const validarCPF = (cpf) => {
 
 const validarRG = (rg) => {
   rg = rg.replace(/\D/g, '');
-  
-  // Verifica se tem entre 8 e 10 dígitos (padrão brasileiro)
   if (rg.length < 8 || rg.length > 10) return null;
-  
-  // Formata RG (XX.XXX.XXX-X)
   return rg.replace(/(\d{2})(\d{3})(\d{3})(\d{1})/, '$1.$2.$3-$4');
 };
 
 const validarCNH = (cnh) => {
   cnh = cnh.replace(/\D/g, '');
-  
-  // Verifica se tem 11 dígitos
   if (cnh.length !== 11) return null;
-  
   return cnh.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
 };
 
@@ -297,28 +278,23 @@ router.post('/ocr', upload.single('documento'), async (req, res) => {
 
     console.log('Processando OCR para:', req.file.filename);
 
-    // Criar worker do Tesseract
     const worker = await createWorker({
       logger: m => console.log(m),
       errorHandler: err => console.error(err)
     });
 
     try {
-      // Inicializar com português
       await worker.loadLanguage('por');
       await worker.initialize('por');
       
-      // Configurar parâmetros para documentos
       await worker.setParameters({
-        tessedit_pageseg_mode: '6', // Orientação automática e segmentação
-        tessedit_ocr_engine_mode: '1', // LSTM apenas
+        tessedit_pageseg_mode: '6',
+        tessedit_ocr_engine_mode: '1',
         preserve_interword_spaces: '1',
       });
 
-      // Processar OCR
       const { data: { text } } = await worker.recognize(req.file.path);
 
-      // Padrões regex para documentos brasileiros
       const patterns = {
         nome: /(nome|name|nome completo)[\s:]*([A-ZÀ-Ÿ][A-zÀ-ÿ']+\s[A-zÀ-ÿ'\s]+)/gi,
         cpf: /(\d{3}[.-]?\d{3}[.-]?\d{3}[.-]?\d{2})/g,
@@ -328,7 +304,6 @@ router.post('/ocr', upload.single('documento'), async (req, res) => {
         nomeMae: /(filia..o|mãe|nome da mãe)[\s:]*([A-ZÀ-Ÿ][A-zÀ-ÿ']+\s[A-zÀ-ÿ'\s]+)/gi
       };
 
-      // Extrair informações
       const extractedData = {};
       
       for (const [key, regex] of Object.entries(patterns)) {
@@ -336,7 +311,6 @@ router.post('/ocr', upload.single('documento'), async (req, res) => {
         let match;
         
         while ((match = regex.exec(text)) !== null) {
-          // O segundo grupo de captura geralmente contém o valor
           if (match[2]) {
             matches.push(match[2].trim());
           } else if (match[1]) {
@@ -344,18 +318,15 @@ router.post('/ocr', upload.single('documento'), async (req, res) => {
           }
         }
         
-        // Manter apenas valores únicos
         extractedData[key] = [...new Set(matches)];
       }
 
-      // Validar e formatar documentos
       const documentos = {
         cpf: extractedData.cpf ? extractedData.cpf.map(cpf => validarCPF(cpf)).filter(Boolean) : [],
         rg: extractedData.rg ? extractedData.rg.map(rg => validarRG(rg)).filter(Boolean) : [],
         cnh: extractedData.cnh ? extractedData.cnh.map(cnh => validarCNH(cnh)).filter(Boolean) : []
       };
 
-      // Determinar o documento principal
       let documentoPrincipal = null;
       let tipoDocumento = null;
       
@@ -370,7 +341,6 @@ router.post('/ocr', upload.single('documento'), async (req, res) => {
         tipoDocumento = 'RG';
       }
 
-      // Limpar arquivo temporário
       fs.unlinkSync(req.file.path);
 
       res.json({
@@ -388,11 +358,10 @@ router.post('/ocr', upload.single('documento'), async (req, res) => {
       });
 
     } finally {
-      await worker.terminate(); // Terminar worker sempre
+      await worker.terminate();
     }
 
   } catch (error) {
-    // Limpar arquivo em caso de erro
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -402,9 +371,9 @@ router.post('/ocr', upload.single('documento'), async (req, res) => {
   }
 });
 
+// Template de importação
 router.get('/template', async (req, res) => {
   try {
-    // Dados de exemplo
     const templateData = [
       {
         nome: 'Joao Silva Santos',
@@ -420,19 +389,15 @@ router.get('/template', async (req, res) => {
       }
     ];
 
-    // Criar workbook e worksheet
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(templateData);
-    XLSX.utils.book_append_sheet(wb, ws, 'Pessoas');
+    const wb = utils.book_new();
+    const ws = utils.json_to_sheet(templateData);
+    utils.book_append_sheet(wb, ws, 'Pessoas');
 
-    // Gerar buffer correto em formato XLSX
-    const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });
+    const buffer = utils.write(wb, { bookType: 'xlsx', type: 'buffer' });
 
-    // Headers para download
     res.setHeader('Content-Disposition', 'attachment; filename="template-importacao.xlsx"');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 
-    // Enviar arquivo
     res.send(buffer);
   } catch (error) {
     console.error('Erro ao gerar template:', error);
