@@ -1,4 +1,4 @@
-import {  Pool  } from 'pg.js';
+import {  Pool  } from 'pg';
 require('dotenv').config();
 
 // Configuração do pool de conexões PostgreSQL
