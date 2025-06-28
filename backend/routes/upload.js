@@ -5,7 +5,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { createWorker } from 'tesseract.js';
-import { query } from '../database/postgres.js';
+import { query } from '../database/postgres';
 
 // Configuração do multer para upload de arquivos
 const storage = multer.diskStorage({
