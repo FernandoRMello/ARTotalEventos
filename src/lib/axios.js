@@ -6,7 +6,7 @@ const baseURL = 'https://artotaleventos.onrender.com';
 
 // Criar instância do axios
 const api = axios.create({
-  baseURL,
+  baseURL:
   timeout: 30000, // 30 segundos
   headers: {
     'Content-Type': 'application/json',
