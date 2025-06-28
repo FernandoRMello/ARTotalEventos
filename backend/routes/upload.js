@@ -1,11 +1,12 @@
 import express from 'express';
 const router = express.Router();
-import multer from 'multer.js';
-import path from 'path.js';
-import fs from 'fs.js';
-import XLSX from 'xlsx.js';
-import Tesseract from 'tesseract.js';
-import {  query  } from '../database/postgres.js';
+const XLSX = require('xlsx');
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import XLSX from 'xlsx';
+import Tesseract from 'tesseract';
+import {  query  } from '../database/postgres';
 
 // Configuração do multer para upload de arquivos
 const storage = multer.diskStorage({
