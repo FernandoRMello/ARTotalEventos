@@ -4,18 +4,21 @@ import cors from 'cors';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { networkInterfaces } from 'os';
 
-ReferenceError: require is not defined in ES module scope
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const path = require('path');
-const fs = require('fs');
-require('dotenv').config();
+import empresasRoutes from './routes/empresas.js';
+import pessoasRoutes from './routes/pessoas.js';
+import checkinsRoutes from './routes/checkins.js';
+import relatoriosRoutes from './routes/relatorios.js';
+import uploadRoutes from './routes/upload.js';
+import { initializeTables, testConnection } from './database/postgres.js';
 
-const { initializeTables, testConnection } = require('./database/postgres');
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -41,13 +44,6 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Importar rotas
-const empresasRoutes = require('./routes/empresas');
-const pessoasRoutes = require('./routes/pessoas');
-const checkinsRoutes = require('./routes/checkins');
-const relatoriosRoutes = require('./routes/relatorios');
-const uploadRoutes = require('./routes/upload');
-
 // Usar rotas
 app.use('/api/empresas', empresasRoutes);
 app.use('/api/pessoas', pessoasRoutes);
@@ -55,12 +51,12 @@ app.use('/api/checkins', checkinsRoutes);
 app.use('/api/relatorios', relatoriosRoutes);
 app.use('/api/upload', uploadRoutes);
 
-// Rota de health check
+// Health Check
 app.get('/health', async (req, res) => {
   try {
     const dbConnected = await testConnection();
     res.json({ 
-      status: 'ok', 
+      status: 'ok',
       timestamp: new Date().toISOString(),
       database: dbConnected ? 'PostgreSQL connected' : 'PostgreSQL disconnected',
       environment: process.env.NODE_ENV || 'development'
@@ -90,7 +86,6 @@ app.use((err, req, res, next) => {
 
 // Função para obter IP local
 function getLocalIP() {
-  const { networkInterfaces } = require('os');
   const nets = networkInterfaces();
   const results = [];
 
@@ -108,32 +103,23 @@ function getLocalIP() {
 const startServer = async () => {
   try {
     console.log('🔄 Iniciando sistema...');
-    
-    // Verificar variáveis de ambiente
+
     if (!process.env.DATABASE_URL && !process.env.NETLIFY_DATABASE_URL && !process.env.NETLIFY_DATABASE_URL_UNPOOLED) {
       console.error('❌ Variável DATABASE_URL não encontrada!');
-      console.log('💡 Configure uma das seguintes variáveis:');
-      console.log('   - DATABASE_URL');
-      console.log('   - NETLIFY_DATABASE_URL');
-      console.log('   - NETLIFY_DATABASE_URL_UNPOOLED');
       process.exit(1);
     }
 
-    // Testar conexão com banco
     console.log('🔄 Testando conexão com PostgreSQL...');
     const dbConnected = await testConnection();
-    
+
     if (!dbConnected) {
       console.error('❌ Não foi possível conectar ao banco de dados');
-      console.log('💡 Verifique se a URL do banco está correta');
       process.exit(1);
     }
 
-    // Inicializar banco de dados
     console.log('🔄 Inicializando tabelas do banco...');
     await initializeTables();
 
-    // Iniciar servidor
     app.listen(PORT, '0.0.0.0', () => {
       const localIP = getLocalIP();
       console.log(`
@@ -141,7 +127,7 @@ const startServer = async () => {
 📍 Local: http://localhost:${PORT}
 🌐 Rede: http://${localIP}:${PORT}
 💾 Banco: PostgreSQL (Neon)
-📱 Para acessar de outros dispositivos, use: http://${localIP}:${PORT}
+📱 Acesso em rede: http://${localIP}:${PORT}
 ✅ Sistema pronto para uso!
       `);
     });
@@ -152,6 +138,4 @@ const startServer = async () => {
 };
 
 startServer();
-
-module.exports = app;
 
