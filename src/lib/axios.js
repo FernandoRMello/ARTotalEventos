@@ -1,7 +1,8 @@
+// src/lib/axios.js
 import axios from 'axios';
 
-// URL fixa do backend hospedado no Render
-const baseURL = 'https://artotaleventos.onrender.com/api';
+// URL base do backend hospedado no Render
+const baseURL = 'https://artotaleventos.onrender.com';
 
 // Criar instância do axios
 const api = axios.create({
@@ -15,7 +16,12 @@ const api = axios.create({
 // Interceptor para requests
 api.interceptors.request.use(
   (config) => {
-    console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
+    // Adiciona prefixo /api apenas para rotas de API (exceto /auth)
+    if (!config.url.startsWith('/auth')) {
+      config.url = `/api${config.url}`;
+    }
+    
+    console.log(`API Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
     return config;
   },
   (error) => {
@@ -31,19 +37,50 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    console.error('Response Error:', error.response?.status, error.response?.data);
+    let errorMessage = 'Erro desconhecido';
     
-    if (error.response?.status === 404) {
-      console.warn('Recurso não encontrado');
-    } else if (error.response?.status >= 500) {
-      console.error('Erro interno do servidor');
+    if (error.response) {
+      // Erros com resposta do servidor
+      console.error(
+        `Response Error: ${error.response.status} - ${error.response.config.url}`,
+        error.response.data
+      );
+      
+      // Mensagens personalizadas por status
+      switch (error.response.status) {
+        case 400:
+          errorMessage = 'Requisição inválida';
+          break;
+        case 401:
+          errorMessage = 'Não autorizado - faça login novamente';
+          break;
+        case 403:
+          errorMessage = 'Acesso proibido';
+          break;
+        case 404:
+          errorMessage = 'Recurso não encontrado';
+          break;
+        case 500:
+          errorMessage = 'Erro interno do servidor';
+          break;
+        default:
+          errorMessage = `Erro ${error.response.status}`;
+      }
     } else if (error.code === 'ECONNABORTED') {
       console.error('Timeout na requisição');
-    } else if (!error.response) {
-      console.error('Erro de rede - servidor não está respondendo');
+      errorMessage = 'Tempo limite excedido. Tente novamente.';
+    } else if (error.request) {
+      console.error('Sem resposta do servidor:', error.request);
+      errorMessage = 'Servidor não está respondendo. Verifique sua conexão.';
+    } else {
+      console.error('Erro ao configurar requisição:', error.message);
+      errorMessage = 'Erro na configuração da requisição';
     }
     
-    return Promise.reject(error);
+    // Adiciona mensagem de erro personalizada
+    const customError = new Error(errorMessage);
+    customError.original = error;
+    return Promise.reject(customError);
   }
 );
 
