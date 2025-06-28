@@ -33,7 +33,7 @@ export default function Pessoas() {
       if (filtros.empresa_id) params.append('empresa_id', filtros.empresa_id);
       if (filtros.setor) params.append('setor', filtros.setor);
 
-      const response = await axios.get(`/api/pessoas?${params}`);
+      const response = await axios.get(`/pessoas?${params}`);
       setPessoas(response.data);
     } catch (err) {
       setError('Erro ao carregar pessoas. Tente novamente.');

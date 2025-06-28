@@ -27,7 +27,7 @@ export default function Configuracoes() {
     setError('');
 
     try {
-      const response = await axios.get('/api/empresas');
+      const response = await axios.get('/empresas');
       setEmpresas(response.data);
     } catch (err) {
       setError('Erro ao carregar empresas. Tente novamente.');
@@ -73,13 +73,13 @@ export default function Configuracoes() {
     try {
       if (empresaEditando) {
         // Editar empresa existente
-        await axios.put(`/api/empresas/${empresaEditando.id}`, {
+        await axios.put(`/empresas/${empresaEditando.id}`, {
           nome: nomeEmpresa.trim()
         });
         setSuccess('Empresa atualizada com sucesso!');
       } else {
         // Criar nova empresa
-        await axios.post('/api/empresas', {
+        await axios.post('/empresas', {
           nome: nomeEmpresa.trim()
         });
         setSuccess('Empresa criada com sucesso!');
@@ -107,7 +107,7 @@ export default function Configuracoes() {
     setError('');
 
     try {
-      await axios.delete(`/api/empresas/${empresa.id}`);
+      await axios.delete(`/empresas/${empresa.id}`);
       setSuccess('Empresa excluída com sucesso!');
       await carregarEmpresas();
     } catch (err) {

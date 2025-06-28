@@ -95,7 +95,7 @@ formDataOCR.append('documento', file);
     }
 
     try {
-      const response = await axios.get('/api/empresas', {
+      const response = await axios.get('/empresas', {
         timeout: 10000 // 10 segundos de timeout
       });
       setEmpresas(response.data);
@@ -270,7 +270,7 @@ formDataOCR.append('documento', file);
     formDataOCR.append('documento', file);
 
     try {
-      const response = await axios.post('/api/upload/ocr', formDataOCR, {
+      const response = await axios.post('/upload/ocr', formDataOCR, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -358,7 +358,7 @@ formDataOCR.append('documento', file);
     }
 
     try {
-      const response = await axios.post('/api/empresas', {
+      const response = await axios.post('/empresas', {
         nome: nomeEmpresa
       }, {
         timeout: 10000
@@ -404,7 +404,7 @@ formDataOCR.append('documento', file);
         return;
       }
 
-      const response = await axios.post('/api/pessoas', {
+      const response = await axios.post('/pessoas', {
         nome: formData.nome.trim(),
         documento: formData.documento.trim(),
         tipo_documento: formData.tipo_documento || null,
