@@ -1,17 +1,15 @@
-// src/lib/axios.js
+// Criar instância do axios
 import axios from 'axios';
 
-// URL base do backend hospedado no Render
-const baseURL = 'https://artotaleventos.onrender.com';
-
-// Criar instância do axios
 const api = axios.create({
-  baseURL:
-  timeout: 30000, // 30 segundos
+  baseURL: import.meta.env.VITE_API_URL || 'https://artotaleventos.onrender.com/api',
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+export default api;
 
 // Interceptor para requests
 api.interceptors.request.use(
