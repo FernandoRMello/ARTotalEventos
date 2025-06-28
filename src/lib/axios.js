@@ -3,7 +3,7 @@ import axios from 'axios';
 // Configuração da URL base da API
 const baseURL = import.meta.env.VITE_API_URL || 
   (import.meta.env.MODE === 'production' 
-    ? 'https://3002-ifzu3hsj8g4vhzb8aalgs-4a1bc7ee.manusvm.computer'
+    ? 'VITE_API_URL=https://archeckin.onrender.com/api'
     : 'http://localhost:3001');
 
 // Criar instância do axios
