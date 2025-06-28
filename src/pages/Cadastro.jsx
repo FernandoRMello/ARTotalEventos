@@ -1,371 +1,446 @@
-import { useState, useRef, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Camera, Upload, User, Building, Hash, FileText, CheckCircle, AlertCircle } from 'lucide-react';
-import axios from '../lib/axios';
+import express from 'express';
+const router = express.Router();
+import XLSX from 'xlsx';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { createWorker } from 'tesseract.js';
+import { query } from '../database/postgres';
 
-export default function Cadastro() {
-  const [formData, setFormData] = useState({
-    nome: '',
-    documento: '',
-    setor: '',
-    empresa_id: ''
-  });
-  const [empresas, setEmpresas] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [ocrLoading, setOcrLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [imagemDocumento, setImagemDocumento] = useState(null);
-  const fileInputRef = useRef(null);
-
-  useEffect(() => {
-    carregarEmpresas();
-  }, []);
-
-  const carregarEmpresas = async () => {
-    try {
-      const response = await axios.get('/api/empresas');
-      setEmpresas(response.data);
-    } catch (err) {
-      console.error('Erro ao carregar empresas:', err);
+// Configuração do multer para upload de arquivos
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
     }
-  };
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
 
-  const handleInputChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-    setError('');
-  };
-
-  const handleImageSelect = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      setImagemDocumento(file);
-      processarOCR(file);
-    }
-  };
-
-  const processarOCR = async (file) => {
-    setOcrLoading(true);
-    setError('');
-
-    const formDataOCR = new FormData();
-    formDataOCR.append('documento', file);
-
-    try {
-      const response = await axios.post('/api/upload/ocr', formDataOCR, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      const { nome, cpf, rg } = response.data;
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.fieldname === 'excel') {
+      // Aceitar arquivos Excel
+      const allowedMimes = [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'application/octet-stream'
+      ];
+      const allowedExts = ['.xlsx', '.xls'];
+      const ext = path.extname(file.originalname).toLowerCase();
       
-      if (nome) {
-        setFormData(prev => ({ ...prev, nome }));
-      }
-      if (cpf) {
-        setFormData(prev => ({ ...prev, documento: cpf }));
-      } else if (rg) {
-        setFormData(prev => ({ ...prev, documento: rg }));
-      }
-
-      if (nome || cpf || rg) {
-        setSuccess('Dados extraídos do documento com sucesso! Verifique e complete as informações.');
+      if (allowedMimes.includes(file.mimetype) || allowedExts.includes(ext)) {
+        cb(null, true);
       } else {
-        setError('Não foi possível extrair dados do documento. Preencha manualmente.');
+        cb(new Error('Apenas arquivos Excel (.xlsx, .xls) são permitidos'));
       }
-    } catch (err) {
-      setError('Erro ao processar imagem do documento. Tente novamente ou preencha manualmente.');
-    } finally {
-      setOcrLoading(false);
-    }
-  };
-
-  const criarEmpresa = async (nomeEmpresa) => {
-    try {
-      const response = await axios.post('/api/empresas', {
-        nome: nomeEmpresa
-      });
-      return response.data.id;
-    } catch (err) {
-      throw new Error('Erro ao criar empresa');
-    }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!formData.nome.trim() || !formData.documento.trim()) {
-      setError('Nome e documento são obrigatórios');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    setSuccess('');
-
-    try {
-      let empresaId = formData.empresa_id;
-
-      // Se não selecionou empresa existente, criar nova
-      if (!empresaId && formData.nova_empresa?.trim()) {
-        empresaId = await criarEmpresa(formData.nova_empresa.trim());
-        await carregarEmpresas(); // Recarregar lista de empresas
-      }
-
-      if (!empresaId) {
-        setError('Selecione uma empresa ou digite o nome de uma nova');
-        return;
-      }
-
-      const response = await axios.post('/api/pessoas', {
-        nome: formData.nome.trim(),
-        documento: formData.documento.trim(),
-        setor: formData.setor.trim() || null,
-        empresa_id: empresaId
-      });
-
-      setSuccess(`Pessoa cadastrada com sucesso: ${response.data.nome}`);
-      
-      // Limpar formulário
-      setFormData({
-        nome: '',
-        documento: '',
-        setor: '',
-        empresa_id: ''
-      });
-      setImagemDocumento(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    } catch (err) {
-      if (err.response?.status === 409) {
-        setError('Documento já cadastrado no sistema');
+    } else if (file.fieldname === 'documento') {
+      // Aceitar imagens para OCR
+      const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
+      if (allowedMimes.includes(file.mimetype)) {
+        cb(null, true);
       } else {
-        setError(err.response?.data?.error || 'Erro ao cadastrar pessoa');
+        cb(new Error('Apenas imagens (JPEG, PNG, GIF) são permitidas'));
       }
-    } finally {
-      setLoading(false);
+    } else {
+      cb(new Error('Campo de arquivo não reconhecido'));
     }
-  };
+  }
+});
 
-  const limparFormulario = () => {
-    setFormData({
-      nome: '',
-      documento: '',
-      setor: '',
-      empresa_id: ''
+// Validar arquivo Excel
+router.post('/excel/validar', upload.single('excel'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Nenhum arquivo foi enviado' });
+    }
+
+    const workbook = XLSX.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet);
+
+    // Validar estrutura
+    if (data.length === 0) {
+      return res.status(400).json({ error: 'Planilha está vazia' });
+    }
+
+    const requiredFields = ['nome', 'documento', 'empresa'];
+    const firstRow = data[0];
+    const missingFields = requiredFields.filter(field => !(field in firstRow));
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({ 
+        error: `Campos obrigatórios ausentes: ${missingFields.join(', ')}`,
+        required: requiredFields,
+        found: Object.keys(firstRow)
+      });
+    }
+
+    // Validar dados
+    const errors = [];
+    const empresas = new Set();
+    const documentos = new Set();
+
+    data.forEach((row, index) => {
+      const rowNum = index + 2; // +2 porque começa do 1 e pula o cabeçalho
+
+      if (!row.nome || row.nome.trim() === '') {
+        errors.push(`Linha ${rowNum}: Nome é obrigatório`);
+      }
+
+      if (!row.documento || row.documento.toString().trim() === '') {
+        errors.push(`Linha ${rowNum}: Documento é obrigatório`);
+      } else {
+        const doc = row.documento.toString().trim();
+        if (documentos.has(doc)) {
+          errors.push(`Linha ${rowNum}: Documento ${doc} duplicado na planilha`);
+        }
+        documentos.add(doc);
+      }
+
+      if (!row.empresa || row.empresa.trim() === '') {
+        errors.push(`Linha ${rowNum}: Empresa é obrigatória`);
+      } else {
+        empresas.add(row.empresa.trim());
+      }
     });
-    setImagemDocumento(null);
-    setError('');
-    setSuccess('');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+
+    // Verificar documentos já existentes no banco
+    if (documentos.size > 0) {
+      const docsArray = Array.from(documentos);
+      const placeholders = docsArray.map((_, i) => `$${i + 1}`).join(',');
+      
+      const existingDocsResult = await query(`
+        SELECT documento FROM pessoas WHERE documento IN (${placeholders})
+      `, docsArray);
+
+      existingDocsResult.rows.forEach(row => {
+        errors.push(`Documento ${row.documento} já existe no sistema`);
+      });
     }
-  };
 
-  return (
-    <div className="container mx-auto px-4 py-8 max-w-4xl">
-      <div className="text-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2 flex items-center justify-center gap-2">
-          <User className="h-8 w-8 text-blue-600" />
-          Cadastro Manual de Pessoas
-        </h1>
-        <p className="text-gray-600">
-          Cadastre pessoas individualmente com extração automática de dados via OCR
-        </p>
-      </div>
+    // Limpar arquivo temporário
+    fs.unlinkSync(req.file.path);
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* OCR de Documento */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Camera className="h-5 w-5" />
-              OCR de Documento (Opcional)
-            </CardTitle>
-            <CardDescription>
-              Faça upload de uma foto do documento para extrair dados automaticamente
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-              {imagemDocumento ? (
-                <div className="space-y-2">
-                  <FileText className="mx-auto h-12 w-12 text-green-500" />
-                  <p className="text-sm text-green-600">
-                    Imagem carregada: {imagemDocumento.name}
-                  </p>
-                  {ocrLoading && (
-                    <p className="text-sm text-blue-600">
-                      Processando OCR...
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Upload className="mx-auto h-12 w-12 text-gray-400" />
-                  <p className="text-sm text-gray-600">
-                    Clique para selecionar uma imagem do documento
-                  </p>
-                </div>
-              )}
-              
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleImageSelect}
-                className="hidden"
-                id="image-upload"
-              />
-              <label htmlFor="image-upload">
-                <Button 
-                  variant="outline" 
-                  className="mt-2 cursor-pointer"
-                  disabled={ocrLoading}
-                >
-                  {ocrLoading ? 'Processando...' : 'Selecionar Imagem'}
-                </Button>
-              </label>
-            </div>
+    if (errors.length > 0) {
+      return res.status(400).json({ 
+        error: 'Erros encontrados na validação',
+        errors: errors.slice(0, 10), // Limitar a 10 erros
+        total_errors: errors.length
+      });
+    }
 
-            <div className="text-sm text-gray-500">
-              <p><strong>Dica:</strong> Para melhores resultados:</p>
-              <ul className="list-disc list-inside mt-1 space-y-1">
-                <li>Use boa iluminação</li>
-                <li>Mantenha o documento reto</li>
-                <li>Evite reflexos e sombras</li>
-                <li>Certifique-se de que o texto está legível</li>
-              </ul>
-            </div>
-          </CardContent>
-        </Card>
+    res.json({
+      message: 'Arquivo válido',
+      total_registros: data.length,
+      empresas_encontradas: Array.from(empresas),
+      preview: data.slice(0, 5) // Mostrar apenas os primeiros 5 registros
+    });
 
-        {/* Formulário Manual */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Dados da Pessoa</CardTitle>
-            <CardDescription>
-              Preencha os dados manualmente ou complete após o OCR
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="nome">Nome Completo *</Label>
-                <Input
-                  id="nome"
-                  placeholder="Digite o nome completo"
-                  value={formData.nome}
-                  onChange={(e) => handleInputChange('nome', e.target.value)}
-                  required
-                />
-              </div>
+  } catch (error) {
+    // Limpar arquivo em caso de erro
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    console.error('Erro ao validar Excel:', error);
+    res.status(500).json({ error: 'Erro ao processar arquivo Excel' });
+  }
+});
 
-              <div className="space-y-2">
-                <Label htmlFor="documento">Documento (CPF/RG) *</Label>
-                <Input
-                  id="documento"
-                  placeholder="Digite o CPF ou RG"
-                  value={formData.documento}
-                  onChange={(e) => handleInputChange('documento', e.target.value)}
-                  required
-                />
-              </div>
+// Importar arquivo Excel
+router.post('/excel', upload.single('excel'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Nenhum arquivo foi enviado' });
+    }
 
-              <div className="space-y-2">
-                <Label htmlFor="setor">Setor</Label>
-                <Input
-                  id="setor"
-                  placeholder="Digite o setor (opcional)"
-                  value={formData.setor}
-                  onChange={(e) => handleInputChange('setor', e.target.value)}
-                />
-              </div>
+    const workbook = XLSX.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet);
 
-              <div className="space-y-2">
-                <Label htmlFor="empresa">Empresa *</Label>
-                <Select 
-                  value={formData.empresa_id} 
-                  onValueChange={(value) => handleInputChange('empresa_id', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione uma empresa" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {empresas.map((empresa) => (
-                      <SelectItem key={empresa.id} value={empresa.id.toString()}>
-                        {empresa.nome}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+    let empresasCriadas = 0;
+    let pessoasCriadas = 0;
+    const errors = [];
 
-              <div className="space-y-2">
-                <Label htmlFor="nova_empresa">Ou criar nova empresa</Label>
-                <Input
-                  id="nova_empresa"
-                  placeholder="Digite o nome da nova empresa"
-                  value={formData.nova_empresa || ''}
-                  onChange={(e) => handleInputChange('nova_empresa', e.target.value)}
-                />
-              </div>
+    // Processar cada linha
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const rowNum = i + 2;
 
-              <div className="flex gap-2 pt-4">
-                <Button 
-                  type="submit" 
-                  disabled={loading}
-                  className="flex-1"
-                >
-                  {loading ? 'Cadastrando...' : 'Cadastrar Pessoa'}
-                </Button>
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={limparFormulario}
-                  className="flex-1"
-                >
-                  Limpar
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
+      try {
+        // Verificar/criar empresa
+        let empresaResult = await query(`
+          SELECT id FROM empresas WHERE nome = $1
+        `, [row.empresa.trim()]);
 
-      {/* Mensagens de erro e sucesso */}
-      {error && (
-        <Alert variant="destructive" className="mt-6">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+        let empresaId;
+        if (empresaResult.rows.length === 0) {
+          // Criar nova empresa
+          const novaEmpresaResult = await query(`
+            INSERT INTO empresas (nome) VALUES ($1) RETURNING id
+          `, [row.empresa.trim()]);
+          empresaId = novaEmpresaResult.rows[0].id;
+          empresasCriadas++;
+        } else {
+          empresaId = empresaResult.rows[0].id;
+        }
 
-      {success && (
-        <Alert className="mt-6 border-green-200 bg-green-50">
-          <CheckCircle className="h-4 w-4 text-green-600" />
-          <AlertDescription className="text-green-800">
-            {success}
-          </AlertDescription>
-        </Alert>
-      )}
+        // Criar pessoa
+        await query(`
+          INSERT INTO pessoas (nome, documento, setor, empresa_id) 
+          VALUES ($1, $2, $3, $4)
+        `, [
+          row.nome.trim(),
+          row.documento.toString().trim(),
+          row.setor ? row.setor.trim() : null,
+          empresaId
+        ]);
+        pessoasCriadas++;
 
-      <div className="mt-6 text-center text-sm text-gray-500">
-        <p>
-          * Campos obrigatórios. Após o cadastro, a pessoa estará disponível para check-in.
-        </p>
-      </div>
-    </div>
-  );
-}
+      } catch (error) {
+        console.error(`Erro na linha ${rowNum}:`, error);
+        if (error.code === '23505') { // Unique violation
+          errors.push(`Linha ${rowNum}: Documento ${row.documento} já existe`);
+        } else {
+          errors.push(`Linha ${rowNum}: ${error.message}`);
+        }
+      }
+    }
 
+    // Limpar arquivo temporário
+    fs.unlinkSync(req.file.path);
+
+    res.json({
+      message: 'Importação concluída',
+      empresas_criadas: empresasCriadas,
+      pessoas_criadas: pessoasCriadas,
+      total_processados: data.length,
+      errors: errors
+    });
+
+  } catch (error) {
+    // Limpar arquivo em caso de erro
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    console.error('Erro ao importar Excel:', error);
+    res.status(500).json({ error: 'Erro ao importar arquivo Excel' });
+  }
+});
+
+// Funções de validação para documentos brasileiros
+const validarCPF = (cpf) => {
+  cpf = cpf.replace(/\D/g, '');
+  
+  // Verifica se tem 11 dígitos
+  if (cpf.length !== 11) return null;
+  
+  // Verifica se todos os dígitos são iguais (inválido)
+  if (/^(\d)\1{10}$/.test(cpf)) return null;
+  
+  // Validação do primeiro dígito verificador
+  let soma = 0;
+  for (let i = 0; i < 9; i++) {
+    soma += parseInt(cpf.charAt(i)) * (10 - i);
+  }
+  let resto = (soma * 10) % 11;
+  if (resto === 10 || resto === 11) resto = 0;
+  if (resto !== parseInt(cpf.charAt(9))) return null;
+  
+  // Validação do segundo dígito verificador
+  soma = 0;
+  for (let i = 0; i < 10; i++) {
+    soma += parseInt(cpf.charAt(i)) * (11 - i);
+  }
+  resto = (soma * 10) % 11;
+  if (resto === 10 || resto === 11) resto = 0;
+  if (resto !== parseInt(cpf.charAt(10))) return null;
+  
+  return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+};
+
+const validarRG = (rg) => {
+  rg = rg.replace(/\D/g, '');
+  
+  // Verifica se tem entre 8 e 10 dígitos (padrão brasileiro)
+  if (rg.length < 8 || rg.length > 10) return null;
+  
+  // Formata RG (XX.XXX.XXX-X)
+  return rg.replace(/(\d{2})(\d{3})(\d{3})(\d{1})/, '$1.$2.$3-$4');
+};
+
+const validarCNH = (cnh) => {
+  cnh = cnh.replace(/\D/g, '');
+  
+  // Verifica se tem 11 dígitos
+  if (cnh.length !== 11) return null;
+  
+  return cnh.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+};
+
+// OCR de documento para documentos brasileiros
+router.post('/ocr', upload.single('documento'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Nenhuma imagem foi enviada' });
+    }
+
+    console.log('Processando OCR para:', req.file.filename);
+
+    // Criar worker do Tesseract
+    const worker = await createWorker({
+      logger: m => console.log(m),
+      errorHandler: err => console.error(err)
+    });
+
+    try {
+      // Inicializar com português
+      await worker.loadLanguage('por');
+      await worker.initialize('por');
+      
+      // Configurar parâmetros para documentos
+      await worker.setParameters({
+        tessedit_pageseg_mode: '6', // Orientação automática e segmentação
+        tessedit_ocr_engine_mode: '1', // LSTM apenas
+        preserve_interword_spaces: '1',
+      });
+
+      // Processar OCR
+      const { data: { text } } = await worker.recognize(req.file.path);
+
+      // Padrões regex para documentos brasileiros
+      const patterns = {
+        nome: /(nome|name|nome completo)[\s:]*([A-ZÀ-Ÿ][A-zÀ-ÿ']+\s[A-zÀ-ÿ'\s]+)/gi,
+        cpf: /(\d{3}[.-]?\d{3}[.-]?\d{3}[.-]?\d{2})/g,
+        rg: /(\d{1,2}\.?\d{3}\.?\d{3}-?[0-9X])/g,
+        cnh: /(cnh|registro)[\s:]*(\d{11})/gi,
+        dataNascimento: /(nascimento|nasc\.|data de nascimento)[\s:]*(\d{2}[./]\d{2}[./]\d{4})/gi,
+        nomeMae: /(filia..o|mãe|nome da mãe)[\s:]*([A-ZÀ-Ÿ][A-zÀ-ÿ']+\s[A-zÀ-ÿ'\s]+)/gi
+      };
+
+      // Extrair informações
+      const extractedData = {};
+      
+      for (const [key, regex] of Object.entries(patterns)) {
+        const matches = [];
+        let match;
+        
+        while ((match = regex.exec(text)) !== null) {
+          // O segundo grupo de captura geralmente contém o valor
+          if (match[2]) {
+            matches.push(match[2].trim());
+          } else if (match[1]) {
+            matches.push(match[1].trim());
+          }
+        }
+        
+        // Manter apenas valores únicos
+        extractedData[key] = [...new Set(matches)];
+      }
+
+      // Validar e formatar documentos
+      const documentos = {
+        cpf: extractedData.cpf ? extractedData.cpf.map(cpf => validarCPF(cpf)).filter(Boolean) : [],
+        rg: extractedData.rg ? extractedData.rg.map(rg => validarRG(rg)).filter(Boolean) : [],
+        cnh: extractedData.cnh ? extractedData.cnh.map(cnh => validarCNH(cnh)).filter(Boolean) : []
+      };
+
+      // Determinar o documento principal
+      let documentoPrincipal = null;
+      let tipoDocumento = null;
+      
+      if (documentos.cpf.length > 0) {
+        documentoPrincipal = documentos.cpf[0];
+        tipoDocumento = 'CPF';
+      } else if (documentos.cnh.length > 0) {
+        documentoPrincipal = documentos.cnh[0];
+        tipoDocumento = 'CNH';
+      } else if (documentos.rg.length > 0) {
+        documentoPrincipal = documentos.rg[0];
+        tipoDocumento = 'RG';
+      }
+
+      // Limpar arquivo temporário
+      fs.unlinkSync(req.file.path);
+
+      res.json({
+        texto_completo: text,
+        dados_extraidos: {
+          nome: extractedData.nome?.[0] || null,
+          documento: documentoPrincipal,
+          tipo_documento: tipoDocumento,
+          data_nascimento: extractedData.dataNascimento?.[0] || null,
+          nome_mae: extractedData.nomeMae?.[0] || null,
+          cpf: documentos.cpf,
+          rg: documentos.rg,
+          cnh: documentos.cnh
+        }
+      });
+
+    } finally {
+      await worker.terminate(); // Terminar worker sempre
+    }
+
+  } catch (error) {
+    // Limpar arquivo em caso de erro
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    console.error('Erro no OCR:', error);
+    res.status(500).json({ error: 'Erro ao processar OCR do documento' });
+  }
+});
+
+router.get('/template', async (req, res) => {
+  try {
+    // Dados de exemplo
+    const templateData = [
+      {
+        nome: 'Joao Silva Santos',
+        documento: '12345678901',
+        empresa: 'Empresa Exemplo Ltda',
+        setor: 'Tecnologia'
+      },
+      {
+        nome: 'Maria Oliveira Costa',
+        documento: '98765432100',
+        empresa: 'Outra Empresa S.A.',
+        setor: 'Marketing'
+      }
+    ];
+
+    // Criar workbook e worksheet
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    XLSX.utils.book_append_sheet(wb, ws, 'Pessoas');
+
+    // Gerar buffer correto em formato XLSX
+    const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });
+
+    // Headers para download
+    res.setHeader('Content-Disposition', 'attachment; filename="template-importacao.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+    // Enviar arquivo
+    res.send(buffer);
+  } catch (error) {
+    console.error('Erro ao gerar template:', error);
+    res.status(500).json({ error: 'Erro ao gerar template' });
+  }
+});
+
+export default router;
