@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Camera, Upload, User, FileText, CheckCircle, AlertCircle, X, RotateCw } from 'lucide-react';
+import { Camera, Upload, User, FileText, CheckCircle, AlertCircle, X, RotateCw, WifiOff, Wifi } from 'lucide-react';
 import axios from '../lib/axios';
 
 export default function Cadastro() {
@@ -29,8 +29,47 @@ export default function Cadastro() {
   const [ocrError, setOcrError] = useState('');
   const [capturedImage, setCapturedImage] = useState(null);
   const [ocrResults, setOcrResults] = useState(null);
+  const [networkStatus, setNetworkStatus] = useState({
+    online: navigator.onLine,
+    lastChecked: new Date()
+  });
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
+
+  // Monitorar status da rede
+  useEffect(() => {
+    const handleOnline = () => {
+      setNetworkStatus({
+        online: true,
+        lastChecked: new Date()
+      });
+    };
+
+    const handleOffline = () => {
+      setNetworkStatus({
+        online: false,
+        lastChecked: new Date()
+      });
+      setError('Sua conexão com a internet foi perdida. Verifique sua rede.');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Verificar conexão periodicamente
+    const connectionChecker = setInterval(() => {
+      setNetworkStatus(prev => ({
+        ...prev,
+        lastChecked: new Date()
+      }));
+    }, 30000);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      clearInterval(connectionChecker);
+    };
+  }, []);
 
   useEffect(() => {
     carregarEmpresas();
@@ -47,12 +86,30 @@ export default function Cadastro() {
     }
   }, [showCameraModal, uploadMethod]);
 
-  const carregarEmpresas = async () => {
+  const carregarEmpresas = async (retryCount = 0) => {
+    if (!networkStatus.online) {
+      setError('Sem conexão com a internet. Verifique sua rede e tente novamente.');
+      return;
+    }
+
     try {
-      const response = await axios.get('/api/empresas');
+      const response = await axios.get('/api/empresas', {
+        timeout: 10000 // 10 segundos de timeout
+      });
       setEmpresas(response.data);
     } catch (err) {
       console.error('Erro ao carregar empresas:', err);
+      
+      if (err.code === 'ECONNABORTED' || err.message === 'Network Error') {
+        setError('A requisição demorou muito ou houve falha na conexão.');
+        
+        // Tentar novamente até 3 vezes
+        if (retryCount < 3) {
+          setTimeout(() => carregarEmpresas(retryCount + 1), 2000);
+        }
+      } else {
+        setError('Erro ao carregar empresas. Tente novamente mais tarde.');
+      }
     }
   };
 
@@ -196,6 +253,11 @@ export default function Cadastro() {
   };
 
   const processarOCR = async (file) => {
+    if (!networkStatus.online) {
+      setOcrError('Sem conexão com a internet. Conecte-se para processar o documento.');
+      return;
+    }
+
     setOcrLoading(true);
     setError('');
     setOcrError('');
@@ -210,6 +272,7 @@ export default function Cadastro() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        timeout: 15000 // 15 segundos de timeout
       });
 
       console.log('Resposta do OCR:', response.data);
@@ -275,6 +338,8 @@ export default function Cadastro() {
         } else if (err.response.data?.error) {
           mensagemErro = `Erro no servidor: ${err.response.data.error}`;
         }
+      } else if (err.code === 'ECONNABORTED') {
+        mensagemErro = 'Tempo limite excedido. Verifique sua conexão com a internet.';
       } else if (err.message === 'Network Error') {
         mensagemErro = 'Falha na conexão. Verifique sua internet e tente novamente.';
       }
@@ -286,18 +351,33 @@ export default function Cadastro() {
   };
 
   const criarEmpresa = async (nomeEmpresa) => {
+    if (!networkStatus.online) {
+      throw new Error('Sem conexão com a internet. Conecte-se para criar uma empresa.');
+    }
+
     try {
       const response = await axios.post('/api/empresas', {
         nome: nomeEmpresa
+      }, {
+        timeout: 10000
       });
       return response.data.id;
     } catch (err) {
-      throw new Error('Erro ao criar empresa');
+      if (err.code === 'ECONNABORTED' || err.message === 'Network Error') {
+        throw new Error('Falha na conexão ao criar empresa. Verifique sua internet.');
+      } else {
+        throw new Error('Erro ao criar empresa');
+      }
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    if (!networkStatus.online) {
+      setError('Sem conexão com a internet. Conecte-se para cadastrar.');
+      return;
+    }
     
     if (!formData.nome.trim() || !formData.documento.trim()) {
       setError('Nome e documento são obrigatórios');
@@ -328,6 +408,8 @@ export default function Cadastro() {
         tipo_documento: formData.tipo_documento || null,
         setor: formData.setor.trim() || null,
         empresa_id: empresaId
+      }, {
+        timeout: 10000
       });
 
       setSuccess(`Pessoa cadastrada com sucesso: ${response.data.nome}`);
@@ -349,6 +431,8 @@ export default function Cadastro() {
     } catch (err) {
       if (err.response?.status === 409) {
         setError('Documento já cadastrado no sistema');
+      } else if (err.code === 'ECONNABORTED' || err.message === 'Network Error') {
+        setError('Falha na conexão. Verifique sua internet e tente novamente.');
       } else {
         setError(err.response?.data?.error || 'Erro ao cadastrar pessoa');
       }
@@ -361,7 +445,7 @@ export default function Cadastro() {
     setFormData({
       nome: '',
       documento: '',
-      setor: '',
+        setor: '',
       empresa_id: '',
       tipo_documento: ''
     });
@@ -373,6 +457,20 @@ export default function Cadastro() {
     setOcrError('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const verificarConexao = () => {
+    setNetworkStatus({
+      online: navigator.onLine,
+      lastChecked: new Date()
+    });
+    
+    if (navigator.onLine) {
+      setError('');
+      carregarEmpresas();
+    } else {
+      setError('Ainda sem conexão com a internet. Verifique sua rede.');
     }
   };
 
@@ -466,6 +564,7 @@ export default function Cadastro() {
               <Button 
                 className="flex-1"
                 onClick={processarImagemConfirmada}
+                disabled={!networkStatus.online}
               >
                 Usar esta imagem
               </Button>
@@ -482,6 +581,33 @@ export default function Cadastro() {
         <p className="text-gray-600">
           Cadastre pessoas individualmente com extração automática de dados via OCR
         </p>
+      </div>
+
+      {/* Status da Conexão */}
+      <div className={`mb-6 p-3 rounded-lg flex items-center justify-between ${
+        networkStatus.online ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+      }`}>
+        <div className="flex items-center gap-2">
+          {networkStatus.online ? (
+            <Wifi className="h-5 w-5" />
+          ) : (
+            <WifiOff className="h-5 w-5" />
+          )}
+          <span>
+            {networkStatus.online 
+              ? 'Conectado à internet' 
+              : 'Sem conexão com a internet'}
+          </span>
+        </div>
+        <Button 
+          variant="ghost" 
+          size="sm"
+          onClick={verificarConexao}
+          className={networkStatus.online ? 'text-green-800' : 'text-red-800'}
+        >
+          <RotateCw className="h-4 w-4 mr-1" />
+          Verificar novamente
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -523,6 +649,7 @@ export default function Cadastro() {
                         variant="outline" 
                         onClick={reprocessarOCR}
                         className="mt-2"
+                        disabled={!networkStatus.online}
                       >
                         <RotateCw className="mr-2 h-4 w-4" />
                         Tentar novamente
@@ -560,7 +687,7 @@ export default function Cadastro() {
                 <Button 
                   variant="outline" 
                   className="flex items-center gap-2"
-                  disabled={ocrLoading}
+                  disabled={ocrLoading || !networkStatus.online}
                   onClick={() => abrirOpcoesUpload('camera')}
                 >
                   <Camera className="h-4 w-4" />
@@ -570,7 +697,7 @@ export default function Cadastro() {
                 <Button 
                   variant="outline" 
                   className="flex items-center gap-2"
-                  disabled={ocrLoading}
+                  disabled={ocrLoading || !networkStatus.online}
                   onClick={() => abrirOpcoesUpload('gallery')}
                 >
                   <Upload className="h-4 w-4" />
@@ -623,6 +750,7 @@ export default function Cadastro() {
                   value={formData.nome}
                   onChange={(e) => handleInputChange('nome', e.target.value)}
                   required
+                  disabled={!networkStatus.online}
                 />
               </div>
 
@@ -634,6 +762,7 @@ export default function Cadastro() {
                   value={formData.documento}
                   onChange={(e) => handleInputChange('documento', e.target.value)}
                   required
+                  disabled={!networkStatus.online}
                 />
                 {formData.tipo_documento && (
                   <p className="text-xs text-gray-500">
@@ -649,6 +778,7 @@ export default function Cadastro() {
                   placeholder="Digite o setor (opcional)"
                   value={formData.setor}
                   onChange={(e) => handleInputChange('setor', e.target.value)}
+                  disabled={!networkStatus.online}
                 />
               </div>
 
@@ -657,9 +787,14 @@ export default function Cadastro() {
                 <Select 
                   value={formData.empresa_id} 
                   onValueChange={(value) => handleInputChange('empresa_id', value)}
+                  disabled={!networkStatus.online || empresas.length === 0}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecione uma empresa" />
+                    <SelectValue placeholder={
+                      empresas.length === 0 && !networkStatus.online 
+                        ? "Carregando empresas..." 
+                        : "Selecione uma empresa"
+                    } />
                   </SelectTrigger>
                   <SelectContent>
                     {empresas.map((empresa) => (
@@ -669,6 +804,11 @@ export default function Cadastro() {
                     ))}
                   </SelectContent>
                 </Select>
+                {empresas.length === 0 && !networkStatus.online && (
+                  <p className="text-xs text-red-500 mt-1">
+                    Não foi possível carregar empresas. Verifique sua conexão.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -678,13 +818,14 @@ export default function Cadastro() {
                   placeholder="Digite o nome da nova empresa"
                   value={formData.nova_empresa || ''}
                   onChange={(e) => handleInputChange('nova_empresa', e.target.value)}
+                  disabled={!networkStatus.online}
                 />
               </div>
 
               <div className="flex gap-2 pt-4">
                 <Button 
                   type="submit" 
-                  disabled={loading}
+                  disabled={loading || !networkStatus.online}
                   className="flex-1"
                 >
                   {loading ? 'Cadastrando...' : 'Cadastrar Pessoa'}
@@ -723,6 +864,9 @@ export default function Cadastro() {
       <div className="mt-6 text-center text-sm text-gray-500">
         <p>
           * Campos obrigatórios. Após o cadastro, a pessoa estará disponível para check-in.
+        </p>
+        <p className="mt-1">
+          Última verificação de conexão: {networkStatus.lastChecked.toLocaleTimeString()}
         </p>
       </div>
     </div>
