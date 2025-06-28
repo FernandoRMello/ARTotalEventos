@@ -12,7 +12,11 @@ import { initializeTables, testConnection } from './database/postgres.js';
 const app = express();
 dotenv.config();
 
-app.use(cors());
+app.use(cors({
+  origin: '*', // ou especifique o domínio do Netlify para mais segurança
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: false
+}));
 app.use(express.json());
 app.use(morgan('dev'));
 
