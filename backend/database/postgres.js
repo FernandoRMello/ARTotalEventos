@@ -105,9 +105,11 @@ async function closePool() {
   await pool.end();
   console.log('Pool de conexões PostgreSQL fechado');
 }
-
 export {
   query,
   getClient,
   pool,
-  initializeT
+  initializeTables,
+  testConnection,
+  closePool
+};
