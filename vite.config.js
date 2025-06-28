@@ -3,7 +3,6 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -12,9 +11,9 @@ export default defineConfig({
     },
   },
   build: {
+    minify: 'esbuild',
     rollupOptions: {
       output: {
-        // Garantir que arquivos JS tenham extensão correta
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: (assetInfo) => {
@@ -26,29 +25,12 @@ export default defineConfig({
           if (/css/i.test(ext)) {
             return `assets/css/[name]-[hash][extname]`;
           }
-          if (/woff2?|ttf|otf|eot/i.test(ext)) {
-            return `assets/fonts/[name]-[hash][extname]`;
-          }
           return `assets/[name]-[hash][extname]`;
         }
       }
     },
-    // Configurações para melhor compatibilidade
     target: 'es2015',
     cssCodeSplit: true,
-    sourcemap: false,
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true
-      }
-    }
-  },
-  server: {
-    // Configurações para desenvolvimento
-    headers: {
-      'Content-Type': 'application/javascript; charset=utf-8'
-    }
+    sourcemap: false
   }
 })
