@@ -9,8 +9,6 @@ const api = axios.create({
   },
 });
 
-export default api;
-
 // Interceptor para requests
 api.interceptors.request.use(
   (config) => {
@@ -18,7 +16,7 @@ api.interceptors.request.use(
     if (!config.url.startsWith('/auth')) {
       config.url = `/api${config.url}`;
     }
-    
+
     console.log(`API Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
     return config;
   },
@@ -36,14 +34,14 @@ api.interceptors.response.use(
   },
   (error) => {
     let errorMessage = 'Erro desconhecido';
-    
+
     if (error.response) {
       // Erros com resposta do servidor
       console.error(
         `Response Error: ${error.response.status} - ${error.response.config.url}`,
         error.response.data
       );
-      
+
       // Mensagens personalizadas por status
       switch (error.response.status) {
         case 400:
@@ -74,7 +72,7 @@ api.interceptors.response.use(
       console.error('Erro ao configurar requisição:', error.message);
       errorMessage = 'Erro na configuração da requisição';
     }
-    
+
     // Adiciona mensagem de erro personalizada
     const customError = new Error(errorMessage);
     customError.original = error;
