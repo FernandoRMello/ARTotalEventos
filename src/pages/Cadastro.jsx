@@ -35,6 +35,8 @@ export default function Cadastro() {
   });
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
+  const formDataOCR = new FormData();
+formDataOCR.append('documento', file);
 
   // Monitorar status da rede
   useEffect(() => {
