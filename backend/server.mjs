@@ -1,4 +1,13 @@
-const express = require('express');
+import express from 'express';
+import helmet from 'helmet';
+import cors from 'cors';
+import morgan from 'morgan';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { networkInterfaces } from 'os';
+
+ReferenceError: require is not defined in ES module scope
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
