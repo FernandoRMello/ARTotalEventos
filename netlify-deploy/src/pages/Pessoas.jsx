@@ -19,9 +19,16 @@ export default function Pessoas() {
     setor: ''
   });
 
-  useEffect(() => {
-    carregarPessoas();
-  }, []);
+useEffect(() => {
+  fetch("/pessoas")
+    .then(res => res.json())
+    .then(data => {
+      const lista = Array.isArray(data) ? data : Object.values(data || {});
+      const filtrados = lista.filter(p => p.nome);
+      setPessoas(filtrados);
+    })
+    .catch(err => console.error("Erro ao carregar:", err));
+}, []);
 
   const carregarPessoas = async () => {
     setLoading(true);
