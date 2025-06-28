@@ -410,4 +410,4 @@ router.get('/template', async (req, res) => {
   }
 });
 
-export default router;
+export default Cadastro;
