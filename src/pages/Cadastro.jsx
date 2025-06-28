@@ -1,5 +1,6 @@
-import * as XLSX from 'xlsx/dist/xlsx.full.min.js';
-import multer from 'multer';
+import React, { useState } from 'react';
+import * as XLSX from 'xlsx'; // ✅ Correta para Vite/Netlify
+import api from '../lib/axios';
 import { createWorker } from 'tesseract.js';
 import { query } from '../database/postgres';
 
