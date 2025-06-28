@@ -4,7 +4,6 @@ const XLSX = require('xlsx');
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import XLSX from 'xlsx';
 import Tesseract from 'tesseract';
 import {  query  } from '../database/postgres';
 
