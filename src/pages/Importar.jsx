@@ -13,6 +13,7 @@ export default function Importar() {
   const [resultado, setResultado] = useState(null);
   const [error, setError] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
+  const [progresso, setProgresso] = useState(0);
   const fileInputRef = useRef(null);
 
   const handleButtonClick = () => {
@@ -68,20 +69,35 @@ export default function Importar() {
     setLoading(true);
     setError('');
     setValidacao(null);
+    setProgresso(0);
 
     const formData = new FormData();
     formData.append('excel', arquivo);
 
     try {
-      const response = await axios.post('/api/upload/excel/validar', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+      const response = await axios.post('/upload/excel/validar', formData, {
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          setProgresso(percentCompleted);
+        }
       });
 
-      setValidacao(response.data.validacao);
+      setValidacao(response.data);
     } catch (err) {
-      setError(err.response?.data?.error || 'Erro ao validar arquivo');
+      console.error('Erro na validação:', err);
+      
+      let mensagemErro = 'Erro ao validar arquivo';
+      if (err.code === 'NETWORK_ERROR') {
+        mensagemErro = 'Falha na conexão. Verifique sua internet.';
+      } else if (err.code === 'TIMEOUT') {
+        mensagemErro = 'Tempo limite excedido. Tente novamente.';
+      } else if (err.response?.data?.error) {
+        mensagemErro = err.response.data.error;
+      } else if (err.response?.data?.errors) {
+        mensagemErro = `Erros encontrados: ${err.response.data.errors.join(', ')}`;
+      }
+      
+      setError(mensagemErro);
     } finally {
       setLoading(false);
     }
@@ -96,20 +112,35 @@ export default function Importar() {
     setLoading(true);
     setError('');
     setResultado(null);
+    setProgresso(0);
 
     const formData = new FormData();
     formData.append('excel', arquivo);
 
     try {
-      const response = await axios.post('/api/upload/excel', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+      const response = await axios.post('/upload/excel', formData, {
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          setProgresso(percentCompleted);
+        }
       });
 
-      setResultado(response.data.resultados);
+      setResultado(response.data);
     } catch (err) {
-      setError(err.response?.data?.error || 'Erro ao importar arquivo');
+      console.error('Erro na importação:', err);
+      
+      let mensagemErro = 'Erro ao importar arquivo';
+      if (err.code === 'NETWORK_ERROR') {
+        mensagemErro = 'Falha na conexão. Verifique sua internet.';
+      } else if (err.code === 'TIMEOUT') {
+        mensagemErro = 'Tempo limite excedido. Tente novamente.';
+      } else if (err.response?.data?.error) {
+        mensagemErro = err.response.data.error;
+      } else if (err.response?.data?.errors) {
+        mensagemErro = `Erros durante importação: ${err.response.data.errors.join(', ')}`;
+      }
+      
+      setError(mensagemErro);
     } finally {
       setLoading(false);
     }
@@ -120,21 +151,29 @@ export default function Importar() {
     setValidacao(null);
     setResultado(null);
     setError('');
+    setProgresso(0);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
 
-  const downloadTemplate = () => {
-    // Criar um template Excel simples
-    const csvContent = "nome,documento,setor,empresa\nJoão Silva,12345678901,TI,Empresa A\nMaria Santos,98765432100,RH,Empresa B";
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'template_importacao.csv';
-    a.click();
-    window.URL.revokeObjectURL(url);
+  const downloadTemplate = async () => {
+    try {
+      const response = await axios.get('/upload/template', {
+        responseType: 'blob'
+      });
+      
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'template_importacao.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+    } catch (err) {
+      console.error('Erro ao baixar template:', err);
+      setError('Erro ao baixar o template. Tente novamente.');
+    }
   };
 
   return (
@@ -203,6 +242,15 @@ export default function Importar() {
               </div>
             )}
 
+            {progresso > 0 && (
+              <div className="space-y-2">
+                <Progress value={progresso} className="h-2" />
+                <p className="text-xs text-gray-500 text-center">
+                  {progresso}% enviado
+                </p>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <Button 
                 onClick={validarArquivo} 
@@ -214,7 +262,7 @@ export default function Importar() {
               </Button>
               <Button 
                 onClick={importarArquivo} 
-                disabled={loading || !arquivo}
+                disabled={loading || !arquivo || (validacao?.total_errors > 0)}
                 className="flex-1"
               >
                 {loading ? 'Importando...' : 'Importar'}
@@ -257,6 +305,7 @@ export default function Importar() {
                 <li>• Documentos duplicados são ignorados</li>
                 <li>• Primeira linha deve conter os cabeçalhos</li>
                 <li>• Formato aceito: .xlsx ou .xls</li>
+                <li>• Tamanho máximo: 10MB</li>
               </ul>
             </div>
 
@@ -277,39 +326,44 @@ export default function Importar() {
         <Card className="mt-6">
           <CardHeader>
             <CardTitle>Resultado da Validação</CardTitle>
+            <CardDescription>
+              {validacao.total_errors === 0 
+                ? 'Arquivo válido e pronto para importação' 
+                : 'Corrija os erros antes de importar'}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
               <div className="text-center">
-                <p className="text-2xl font-bold text-blue-600">{validacao.total_linhas}</p>
-                <p className="text-sm text-gray-600">Total de Linhas</p>
+                <p className="text-2xl font-bold text-blue-600">{validacao.total_registros}</p>
+                <p className="text-sm text-gray-600">Total de Registros</p>
               </div>
               <div className="text-center">
-                <p className="text-2xl font-bold text-green-600">{validacao.linhas_validas}</p>
-                <p className="text-sm text-gray-600">Linhas Válidas</p>
+                <p className="text-2xl font-bold text-green-600">{validacao.total_registros - validacao.total_errors}</p>
+                <p className="text-sm text-gray-600">Registros Válidos</p>
               </div>
               <div className="text-center">
-                <p className="text-2xl font-bold text-red-600">{validacao.linhas_invalidas}</p>
-                <p className="text-sm text-gray-600">Linhas Inválidas</p>
+                <p className="text-2xl font-bold text-red-600">{validacao.total_errors}</p>
+                <p className="text-sm text-gray-600">Erros</p>
               </div>
               <div className="text-center">
-                <p className="text-2xl font-bold text-gray-600">{validacao.colunas_encontradas.length}</p>
-                <p className="text-sm text-gray-600">Colunas</p>
+                <p className="text-2xl font-bold text-purple-600">{validacao.empresas_encontradas?.length || 0}</p>
+                <p className="text-sm text-gray-600">Empresas</p>
               </div>
             </div>
 
-            {validacao.erros.length > 0 && (
+            {validacao.errors?.length > 0 && (
               <div>
                 <h4 className="font-semibold mb-2 text-red-600">Erros Encontrados:</h4>
-                <div className="max-h-40 overflow-y-auto">
-                  {validacao.erros.slice(0, 10).map((erro, index) => (
-                    <p key={index} className="text-sm text-red-600">
-                      Linha {erro.linha}: {erro.erro}
+                <div className="max-h-40 overflow-y-auto bg-red-50 p-3 rounded">
+                  {validacao.errors.slice(0, 10).map((erro, index) => (
+                    <p key={index} className="text-sm text-red-600 mb-1">
+                      • {erro}
                     </p>
                   ))}
-                  {validacao.erros.length > 10 && (
+                  {validacao.errors.length > 10 && (
                     <p className="text-sm text-gray-500 mt-2">
-                      ... e mais {validacao.erros.length - 10} erros
+                      ... e mais {validacao.errors.length - 10} erros
                     </p>
                   )}
                 </div>
@@ -324,15 +378,19 @@ export default function Importar() {
         <Card className="mt-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <CheckCircle className="h-5 w-5 text-green-600" />
-              Importação Concluída
+              {resultado.errors?.length > 0 ? (
+                <AlertCircle className="h-5 w-5 text-yellow-600" />
+              ) : (
+                <CheckCircle className="h-5 w-5 text-green-600" />
+              )}
+              {resultado.errors?.length > 0 ? 'Importação com Erros' : 'Importação Concluída'}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
               <div className="text-center">
-                <p className="text-2xl font-bold text-blue-600">{resultado.total_linhas}</p>
-                <p className="text-sm text-gray-600">Total Processadas</p>
+                <p className="text-2xl font-bold text-blue-600">{resultado.total_processados}</p>
+                <p className="text-sm text-gray-600">Total Processados</p>
               </div>
               <div className="text-center">
                 <p className="text-2xl font-bold text-green-600">{resultado.pessoas_criadas}</p>
@@ -343,25 +401,25 @@ export default function Importar() {
                 <p className="text-sm text-gray-600">Empresas Criadas</p>
               </div>
               <div className="text-center">
-                <p className="text-2xl font-bold text-yellow-600">{resultado.pessoas_duplicadas}</p>
-                <p className="text-sm text-gray-600">Duplicadas</p>
+                <p className="text-2xl font-bold text-yellow-600">{resultado.errors?.length || 0}</p>
+                <p className="text-sm text-gray-600">Erros</p>
               </div>
             </div>
 
-            {resultado.erros.length > 0 && (
-              <Alert variant="destructive" className="mt-4">
+            {resultado.errors?.length > 0 && (
+              <Alert variant={resultado.errors.length > 0 ? "destructive" : "default"} className="mt-4">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  <strong>{resultado.erros.length} erros encontrados:</strong>
-                  <div className="mt-2 max-h-32 overflow-y-auto">
-                    {resultado.erros.slice(0, 5).map((erro, index) => (
-                      <p key={index} className="text-sm">
-                        Linha {erro.linha}: {erro.erro}
+                  <strong className="block mb-2">{resultado.errors.length} erros encontrados:</strong>
+                  <div className="mt-2 max-h-48 overflow-y-auto bg-red-50 p-3 rounded">
+                    {resultado.errors.slice(0, 10).map((erro, index) => (
+                      <p key={index} className="text-sm mb-1">
+                        • {erro}
                       </p>
                     ))}
-                    {resultado.erros.length > 5 && (
-                      <p className="text-sm mt-1">
-                        ... e mais {resultado.erros.length - 5} erros
+                    {resultado.errors.length > 10 && (
+                      <p className="text-sm mt-1 text-gray-700">
+                        ... e mais {resultado.errors.length - 10} erros
                       </p>
                     )}
                   </div>
@@ -382,4 +440,3 @@ export default function Importar() {
     </div>
   );
 }
-
