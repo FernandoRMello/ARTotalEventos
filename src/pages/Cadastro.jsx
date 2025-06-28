@@ -1,4 +1,4 @@
-import XLSX from 'xlsx';
+import * as XLSX from 'xlsx/dist/xlsx.full.min.js';
 import multer from 'multer';
 import { createWorker } from 'tesseract.js';
 import { query } from '../database/postgres';
