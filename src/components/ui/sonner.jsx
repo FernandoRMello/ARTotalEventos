@@ -1,9 +1,10 @@
+import { useTheme } from "next-themes"
 import { Toaster as Sonner } from "sonner";
 
 const Toaster = ({
   ...props
 }) => {
-  const theme = "system" // Removido useTheme do next-themes
+  const { theme = "system" } = useTheme()
 
   return (
     <Sonner
