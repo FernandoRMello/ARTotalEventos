@@ -298,13 +298,12 @@ router.post('/ocr', upload.single('documento'), async (req, res) => {
   }
 });
 
-// Download do template Excel
-router.get('/template', (req, res) => {
+router.get('/template', async (req, res) => {
   try {
-    // Criar dados de exemplo
+    // Dados de exemplo
     const templateData = [
       {
-        nome: 'João Silva Santos',
+        nome: 'Joao Silva Santos',
         documento: '12345678901',
         empresa: 'Empresa Exemplo Ltda',
         setor: 'Tecnologia'
@@ -317,20 +316,19 @@ router.get('/template', (req, res) => {
       }
     ];
 
-    // Criar workbook
+    // Criar workbook e worksheet
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(templateData);
-
-    // Adicionar worksheet ao workbook
     XLSX.utils.book_append_sheet(wb, ws, 'Pessoas');
 
-    // Gerar buffer
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    // Gerar buffer correto em formato XLSX
+    const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });
 
-    // Configurar headers para download
-    res.setHeader('Content-Disposition', 'attachment; filename=template-importacao.xlsx');
+    // Headers para download
+    res.setHeader('Content-Disposition', 'attachment; filename="template-importacao.xlsx"');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 
+    // Enviar arquivo
     res.send(buffer);
   } catch (error) {
     console.error('Erro ao gerar template:', error);
@@ -338,5 +336,5 @@ router.get('/template', (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;
 
