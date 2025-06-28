@@ -13,9 +13,9 @@ const app = express();
 dotenv.config();
 
 app.use(cors({
-  origin: '*', // ou especifique o domínio do Netlify para mais segurança
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  credentials: false
+  origin: ['https://archeckin.netlify.app'],
+  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
+  credentials: true
 }));
 app.use(express.json());
 app.use(morgan('dev'));
