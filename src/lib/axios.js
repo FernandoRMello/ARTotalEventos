@@ -1,10 +1,7 @@
 import axios from 'axios';
 
-// Configuração da URL base da API
-const baseURL = import.meta.env.VITE_API_URL || 
-  (import.meta.env.MODE === 'production' 
-    ? 'https://3002-ifzu3hsj8g4vhzb8aalgs-4a1bc7ee.manusvm.computer'
-    : 'http://localhost:3001');
+// URL fixa do backend hospedado no Render
+const baseURL = 'https://artotaleventos.onrender.com/api';
 
 // Criar instância do axios
 const api = axios.create({
@@ -36,7 +33,6 @@ api.interceptors.response.use(
   (error) => {
     console.error('Response Error:', error.response?.status, error.response?.data);
     
-    // Tratamento de erros específicos
     if (error.response?.status === 404) {
       console.warn('Recurso não encontrado');
     } else if (error.response?.status >= 500) {
@@ -52,4 +48,3 @@ api.interceptors.response.use(
 );
 
 export default api;
-
