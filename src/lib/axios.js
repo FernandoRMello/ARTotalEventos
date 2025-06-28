@@ -4,7 +4,7 @@ import axios from 'axios';
 const baseURL = import.meta.env.VITE_API_URL || 
   (import.meta.env.MODE === 'production' 
     ? 'VITE_API_URL=https://archeckin.onrender.com/api'
-    : 'http://localhost:3001');
+    ;
 
 // Criar instância do axios
 const api = axios.create({
