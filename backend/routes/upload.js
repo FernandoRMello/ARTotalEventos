@@ -1,11 +1,11 @@
 import express from 'express';
 const router = express.Router();
-const XLSX = require('xlsx');
+import XLSX from 'xlsx';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import Tesseract from 'tesseract';
-import {  query  } from '../database/postgres';
+import { createWorker } from 'tesseract.js';
+import { query } from '../database/postgres';
 
 // Configuração do multer para upload de arquivos
 const storage = multer.diskStorage({
@@ -241,7 +241,57 @@ router.post('/excel', upload.single('excel'), async (req, res) => {
   }
 });
 
-// OCR de documento
+// Funções de validação para documentos brasileiros
+const validarCPF = (cpf) => {
+  cpf = cpf.replace(/\D/g, '');
+  
+  // Verifica se tem 11 dígitos
+  if (cpf.length !== 11) return null;
+  
+  // Verifica se todos os dígitos são iguais (inválido)
+  if (/^(\d)\1{10}$/.test(cpf)) return null;
+  
+  // Validação do primeiro dígito verificador
+  let soma = 0;
+  for (let i = 0; i < 9; i++) {
+    soma += parseInt(cpf.charAt(i)) * (10 - i);
+  }
+  let resto = (soma * 10) % 11;
+  if (resto === 10 || resto === 11) resto = 0;
+  if (resto !== parseInt(cpf.charAt(9))) return null;
+  
+  // Validação do segundo dígito verificador
+  soma = 0;
+  for (let i = 0; i < 10; i++) {
+    soma += parseInt(cpf.charAt(i)) * (11 - i);
+  }
+  resto = (soma * 10) % 11;
+  if (resto === 10 || resto === 11) resto = 0;
+  if (resto !== parseInt(cpf.charAt(10))) return null;
+  
+  return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+};
+
+const validarRG = (rg) => {
+  rg = rg.replace(/\D/g, '');
+  
+  // Verifica se tem entre 8 e 10 dígitos (padrão brasileiro)
+  if (rg.length < 8 || rg.length > 10) return null;
+  
+  // Formata RG (XX.XXX.XXX-X)
+  return rg.replace(/(\d{2})(\d{3})(\d{3})(\d{1})/, '$1.$2.$3-$4');
+};
+
+const validarCNH = (cnh) => {
+  cnh = cnh.replace(/\D/g, '');
+  
+  // Verifica se tem 11 dígitos
+  if (cnh.length !== 11) return null;
+  
+  return cnh.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+};
+
+// OCR de documento para documentos brasileiros
 router.post('/ocr', upload.single('documento'), async (req, res) => {
   try {
     if (!req.file) {
@@ -250,41 +300,99 @@ router.post('/ocr', upload.single('documento'), async (req, res) => {
 
     console.log('Processando OCR para:', req.file.filename);
 
-    // Processar OCR
-    const { data: { text } } = await Tesseract.recognize(req.file.path, 'por', {
-      logger: m => console.log(m)
+    // Criar worker do Tesseract
+    const worker = await createWorker({
+      logger: m => console.log(m),
+      errorHandler: err => console.error(err)
     });
 
-    // Extrair informações básicas
-    const lines = text.split('\n').filter(line => line.trim().length > 0);
-    
-    // Tentar extrair nome (geralmente nas primeiras linhas)
-    let nome = '';
-    for (let i = 0; i < Math.min(5, lines.length); i++) {
-      const line = lines[i].trim();
-      if (line.length > 5 && /^[A-ZÁÊÇÕ\s]+$/.test(line)) {
-        nome = line;
-        break;
+    try {
+      // Inicializar com português
+      await worker.loadLanguage('por');
+      await worker.initialize('por');
+      
+      // Configurar parâmetros para documentos
+      await worker.setParameters({
+        tessedit_pageseg_mode: '6', // Orientação automática e segmentação
+        tessedit_ocr_engine_mode: '1', // LSTM apenas
+        preserve_interword_spaces: '1',
+      });
+
+      // Processar OCR
+      const { data: { text } } = await worker.recognize(req.file.path);
+
+      // Padrões regex para documentos brasileiros
+      const patterns = {
+        nome: /(nome|name|nome completo)[\s:]*([A-ZÀ-Ÿ][A-zÀ-ÿ']+\s[A-zÀ-ÿ'\s]+)/gi,
+        cpf: /(\d{3}[.-]?\d{3}[.-]?\d{3}[.-]?\d{2})/g,
+        rg: /(\d{1,2}\.?\d{3}\.?\d{3}-?[0-9X])/g,
+        cnh: /(cnh|registro)[\s:]*(\d{11})/gi,
+        dataNascimento: /(nascimento|nasc\.|data de nascimento)[\s:]*(\d{2}[./]\d{2}[./]\d{4})/gi,
+        nomeMae: /(filia..o|mãe|nome da mãe)[\s:]*([A-ZÀ-Ÿ][A-zÀ-ÿ']+\s[A-zÀ-ÿ'\s]+)/gi
+      };
+
+      // Extrair informações
+      const extractedData = {};
+      
+      for (const [key, regex] of Object.entries(patterns)) {
+        const matches = [];
+        let match;
+        
+        while ((match = regex.exec(text)) !== null) {
+          // O segundo grupo de captura geralmente contém o valor
+          if (match[2]) {
+            matches.push(match[2].trim());
+          } else if (match[1]) {
+            matches.push(match[1].trim());
+          }
+        }
+        
+        // Manter apenas valores únicos
+        extractedData[key] = [...new Set(matches)];
       }
+
+      // Validar e formatar documentos
+      const documentos = {
+        cpf: extractedData.cpf ? extractedData.cpf.map(cpf => validarCPF(cpf)).filter(Boolean) : [],
+        rg: extractedData.rg ? extractedData.rg.map(rg => validarRG(rg)).filter(Boolean) : [],
+        cnh: extractedData.cnh ? extractedData.cnh.map(cnh => validarCNH(cnh)).filter(Boolean) : []
+      };
+
+      // Determinar o documento principal
+      let documentoPrincipal = null;
+      let tipoDocumento = null;
+      
+      if (documentos.cpf.length > 0) {
+        documentoPrincipal = documentos.cpf[0];
+        tipoDocumento = 'CPF';
+      } else if (documentos.cnh.length > 0) {
+        documentoPrincipal = documentos.cnh[0];
+        tipoDocumento = 'CNH';
+      } else if (documentos.rg.length > 0) {
+        documentoPrincipal = documentos.rg[0];
+        tipoDocumento = 'RG';
+      }
+
+      // Limpar arquivo temporário
+      fs.unlinkSync(req.file.path);
+
+      res.json({
+        texto_completo: text,
+        dados_extraidos: {
+          nome: extractedData.nome?.[0] || null,
+          documento: documentoPrincipal,
+          tipo_documento: tipoDocumento,
+          data_nascimento: extractedData.dataNascimento?.[0] || null,
+          nome_mae: extractedData.nomeMae?.[0] || null,
+          cpf: documentos.cpf,
+          rg: documentos.rg,
+          cnh: documentos.cnh
+        }
+      });
+
+    } finally {
+      await worker.terminate(); // Terminar worker sempre
     }
-
-    // Tentar extrair CPF (padrão XXX.XXX.XXX-XX ou XXXXXXXXXXX)
-    let cpf = '';
-    const cpfRegex = /(\d{3}\.?\d{3}\.?\d{3}-?\d{2})/g;
-    const cpfMatch = text.match(cpfRegex);
-    if (cpfMatch) {
-      cpf = cpfMatch[0].replace(/[^\d]/g, ''); // Remover pontuação
-    }
-
-    // Limpar arquivo temporário
-    fs.unlinkSync(req.file.path);
-
-    res.json({
-      texto_completo: text,
-      nome_extraido: nome,
-      cpf_extraido: cpf,
-      linhas_processadas: lines.length
-    });
 
   } catch (error) {
     // Limpar arquivo em caso de erro
@@ -335,5 +443,4 @@ router.get('/template', async (req, res) => {
   }
 });
 
-module.exports = router;
-
+export default router;
