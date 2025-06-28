@@ -9,11 +9,10 @@ const api = axios.create({
   },
 });
 
-// Interceptor para requests
 api.interceptors.request.use(
   (config) => {
-    // Adiciona prefixo /api apenas para rotas de API (exceto /auth)
-    if (!config.url.startsWith('/auth')) {
+    // Se a URL já tiver '/api', não adiciona novamente
+    if (!config.url.startsWith('/auth') && !config.url.startsWith('/api')) {
       config.url = `/api${config.url}`;
     }
 
