@@ -1,141 +1,52 @@
 import express from 'express';
-import helmet from 'helmet';
 import cors from 'cors';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
 import path from 'path';
-import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { networkInterfaces } from 'os';
-
-import empresasRoutes from './routes/empresas.js';
-import pessoasRoutes from './routes/pessoas.js';
-import checkinsRoutes from './routes/checkins.js';
-import relatoriosRoutes from './routes/relatorios.js';
-import uploadRoutes from './routes/upload.js';
-import { initializeTables, testConnection } from './database/postgres.js';
-
-dotenv.config();
+import empresasRouter from './routes/empresas.js';
+import pessoasRouter from './routes/pessoas.js';
+import checkinsRouter from './routes/checkins.js';
+import uploadRouter from './routes/upload.js';
+import postgres from './database/postgres.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 10000;
 
-// Middlewares
-app.use(helmet());
-app.use(cors({
-  origin: true,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.use(morgan('combined'));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(morgan('dev'));
 
-// Servir arquivos estáticos do frontend
-app.use(express.static(path.join(__dirname, '../frontend/dist')));
+// Rotas da API
+app.use('/api/empresas', empresasRouter);
+app.use('/api/pessoas', pessoasRouter);
+app.use('/api/checkins', checkinsRouter);
+app.use('/api/upload', uploadRouter);
 
-// Criar diretório de uploads se não existir
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Usar rotas
-app.use('/api/empresas', empresasRoutes);
-app.use('/api/pessoas', pessoasRoutes);
-app.use('/api/checkins', checkinsRoutes);
-app.use('/api/relatorios', relatoriosRoutes);
-app.use('/api/upload', uploadRoutes);
-
-// Health Check
-app.get('/health', async (req, res) => {
-  try {
-    const dbConnected = await testConnection();
-    res.json({ 
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      database: dbConnected ? 'PostgreSQL connected' : 'PostgreSQL disconnected',
-      environment: process.env.NODE_ENV || 'development'
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: 'Database connection failed',
-      error: error.message
-    });
-  }
-});
-
-// Rota para servir o frontend React
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
-});
-
-// Middleware de tratamento de erros
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ 
-    error: 'Algo deu errado!',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Erro interno do servidor'
-  });
-});
-
-// Função para obter IP local
-function getLocalIP() {
-  const nets = networkInterfaces();
-  const results = [];
-
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name]) {
-      if (net.family === 'IPv4' && !net.internal) {
-        results.push(net.address);
-      }
-    }
-  }
-  return results[0] || 'localhost';
-}
-
-// Inicializar servidor
-const startServer = async () => {
-  try {
-    console.log('🔄 Iniciando sistema...');
-
-    if (!process.env.DATABASE_URL && !process.env.NETLIFY_DATABASE_URL && !process.env.NETLIFY_DATABASE_URL_UNPOOLED) {
-      console.error('❌ Variável DATABASE_URL não encontrada!');
-      process.exit(1);
-    }
-
-    console.log('🔄 Testando conexão com PostgreSQL...');
-    const dbConnected = await testConnection();
-
-    if (!dbConnected) {
-      console.error('❌ Não foi possível conectar ao banco de dados');
-      process.exit(1);
-    }
-
-    console.log('🔄 Inicializando tabelas do banco...');
-    await initializeTables();
-
-    app.listen(PORT, '0.0.0.0', () => {
-      const localIP = getLocalIP();
-      console.log(`
-🚀 Servidor iniciado com sucesso!
-📍 Local: http://localhost:${PORT}
-🌐 Rede: http://${localIP}:${PORT}
-💾 Banco: PostgreSQL (Neon)
-📱 Acesso em rede: http://${localIP}:${PORT}
-✅ Sistema pronto para uso!
-      `);
-    });
-  } catch (error) {
-    console.error('❌ Erro ao iniciar servidor:', error);
+// Inicialização do banco de dados
+async function startServer() {
+  console.log('🔄 Iniciando sistema...');
+  console.log('🔄 Testando conexão com PostgreSQL...');
+  const conectado = await postgres.testConnection();
+  if (!conectado) {
+    console.log('❌ Não foi possível conectar ao banco de dados');
     process.exit(1);
   }
-};
+
+  console.log('🔄 Inicializando tabelas do banco...');
+  await postgres.initializeTables();
+
+  app.listen(PORT, () => {
+    console.log('🚀 Servidor iniciado com sucesso!');
+    console.log(`📍 Local: http://localhost:${PORT}`);
+    console.log(`🌐 Rede: http://10.214.166.197:${PORT}`);
+    console.log('💾 Banco: PostgreSQL (Neon)');
+    console.log(`📱 Acesso em rede: http://10.214.166.197:${PORT}`);
+    console.log('✅ Sistema pronto para uso!');
+  });
+}
 
 startServer();
-
