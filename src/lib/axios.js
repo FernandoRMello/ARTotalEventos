@@ -1,13 +1,10 @@
 import axios from 'axios';
 
 // Configuração da URL base da API
-const baseURL = import.meta.env.VITE_API_URL || 
-  (import.meta.env.MODE === 'production' 
-    ? 'VITE_API_URL=https://archeckin.onrender.com/api' );
 
 // Criar instância do axios
 const api = axios.create({
-  baseURL,
+  baseURL==https://archeckin.onrender.com/api,
   timeout: 30000, // 30 segundos
   headers: {
     'Content-Type': 'application/json',
